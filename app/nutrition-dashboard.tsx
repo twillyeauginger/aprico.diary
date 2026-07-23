@@ -1,12 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Skeleton from "react-loading-skeleton";
 import "react-loading-skeleton/dist/skeleton.css";
 
-type SourceType = "database" | "label" | "ai_estimate" | "manual" | "reference";
+export type SourceType =
+  | "database"
+  | "label"
+  | "ai_estimate"
+  | "manual"
+  | "reference";
 
-type MealRecord = {
+export type MealRecord = {
   id: number | string;
   mealDate: string;
   mealType: string;
@@ -27,7 +32,7 @@ type MealRecord = {
   demo?: boolean;
 };
 
-type FoodResult = {
+export type FoodResult = {
   id: string;
   name: string;
   maker?: string;
@@ -44,7 +49,7 @@ type FoodResult = {
   sourceLabel: string;
 };
 
-type AnalysisItem = {
+export type AnalysisItem = {
   name: string;
   portionGrams: number | null;
   portionText: string;
@@ -61,13 +66,86 @@ type AnalysisItem = {
   sourceType: "label" | "ai_estimate";
 };
 
-type AnalysisResult = {
+export type AnalysisResult = {
   imageType: "meal" | "nutrition_label" | "package" | "unknown";
   summary: string;
   items: AnalysisItem[];
   needsUserConfirmation: boolean;
   warnings: string[];
   photoId: string;
+};
+
+export type MealInput = Omit<MealRecord, "id" | "demo">;
+
+export type NutritionClient = {
+  listMeals(month: string): Promise<MealRecord[]>;
+  createMeal(payload: MealInput): Promise<MealRecord>;
+  deleteMeal(id: MealRecord["id"]): Promise<void>;
+  searchFoods(query: string): Promise<FoodResult[]>;
+  analyzePhoto(file: File): Promise<AnalysisResult>;
+};
+
+const legacyNutritionClient: NutritionClient = {
+  async listMeals(month) {
+    const response = await fetch(`/api/meals?month=${month}`);
+    if (!response.ok) throw new Error("기록을 불러오지 못했습니다.");
+    const body = (await response.json()) as { meals: MealRecord[] };
+    return body.meals;
+  },
+  async createMeal(payload) {
+    const response = await fetch("/api/meals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = (await response.json().catch(() => ({}))) as {
+      meal?: MealRecord;
+      error?: string;
+    };
+    if (!response.ok || !body.meal) {
+      throw new Error(body.error ?? "저장하지 못했습니다.");
+    }
+    return body.meal;
+  },
+  async deleteMeal(id) {
+    const response = await fetch(`/api/meals/${id}`, { method: "DELETE" });
+    if (!response.ok) throw new Error("삭제하지 못했습니다.");
+  },
+  async searchFoods(query) {
+    const response = await fetch(`/api/foods?q=${encodeURIComponent(query)}`);
+    const body = (await response.json()) as {
+      foods?: FoodResult[];
+      error?: string;
+    };
+    if (!response.ok) throw new Error(body.error ?? "검색하지 못했습니다.");
+    return body.foods ?? [];
+  },
+  async analyzePhoto(file) {
+    const uploadData = new FormData();
+    uploadData.append("file", file);
+    const uploadResponse = await fetch("/api/photos", {
+      method: "POST",
+      body: uploadData,
+    });
+    const uploaded = (await uploadResponse.json()) as {
+      photoId?: string;
+      error?: string;
+    };
+    if (!uploadResponse.ok || !uploaded.photoId) {
+      throw new Error(uploaded.error ?? "사진을 올리지 못했습니다.");
+    }
+
+    const response = await fetch("/api/analyze", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ photoId: uploaded.photoId }),
+    });
+    const body = (await response.json()) as AnalysisResult & { error?: string };
+    if (!response.ok) {
+      throw new Error(body.error ?? "사진을 분석하지 못했습니다.");
+    }
+    return body;
+  },
 };
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
@@ -240,9 +318,16 @@ function displayDate(key: string) {
   }).format(date);
 }
 
-export function NutritionDashboard() {
-  const todayRef = useRef(new Date());
-  const today = todayRef.current;
+export function NutritionDashboard({
+  client = legacyNutritionClient,
+  userEmail,
+  onSignOut,
+}: {
+  client?: NutritionClient;
+  userEmail?: string;
+  onSignOut?: () => void | Promise<void>;
+}) {
+  const [today] = useState(() => new Date());
   const [viewMonth, setViewMonth] = useState(
     new Date(today.getFullYear(), today.getMonth(), 1),
   );
@@ -267,15 +352,13 @@ export function NutritionDashboard() {
     let cancelled = false;
     async function load() {
       try {
-        const response = await fetch(`/api/meals?month=${monthKey(viewMonth)}`);
-        if (!response.ok) throw new Error("기록을 불러오지 못했습니다.");
-        const body = (await response.json()) as { meals: MealRecord[] };
+        const loadedMeals = await client.listMeals(monthKey(viewMonth));
         if (cancelled) return;
-        if (body.meals.length === 0) {
+        if (loadedMeals.length === 0) {
           setMeals(demoMeals(today));
           setIsDemo(true);
         } else {
-          setMeals(body.meals);
+          setMeals(loadedMeals);
           setIsDemo(false);
         }
       } catch {
@@ -289,11 +372,7 @@ export function NutritionDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [viewMonth, today]);
-
-  useEffect(() => {
-    setManual((current) => ({ ...current, mealDate: selectedDate }));
-  }, [selectedDate]);
+  }, [client, viewMonth, today]);
 
   useEffect(() => {
     if (!toast) return;
@@ -349,25 +428,16 @@ export function NutritionDashboard() {
   }
 
   async function saveMeal(
-    payload: Omit<MealRecord, "id">,
+    payload: MealInput,
     successMessage = "기록에 추가했어요.",
   ) {
-    const response = await fetch("/api/meals", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as { error?: string };
-      throw new Error(body.error ?? "저장하지 못했습니다.");
-    }
-    const body = (await response.json()) as { meal: MealRecord };
+    const meal = await client.createMeal(payload);
     setMeals((current) =>
-      isDemo ? [body.meal] : [...current.filter((meal) => !meal.demo), body.meal],
+      isDemo ? [meal] : [...current.filter((item) => !item.demo), meal],
     );
     setIsDemo(false);
     showToast(successMessage);
-    return body.meal;
+    return meal;
   }
 
   async function handleManualSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -401,10 +471,7 @@ export function NutritionDashboard() {
     if (!query.trim()) return;
     setSearching(true);
     try {
-      const response = await fetch(`/api/foods?q=${encodeURIComponent(query.trim())}`);
-      const body = (await response.json()) as { foods?: FoodResult[]; error?: string };
-      if (!response.ok) throw new Error(body.error ?? "검색하지 못했습니다.");
-      setFoodResults(body.foods ?? []);
+      setFoodResults(await client.searchFoods(query.trim()));
     } catch (error) {
       showToast(error instanceof Error ? error.message : "검색하지 못했습니다.");
     } finally {
@@ -450,28 +517,7 @@ export function NutritionDashboard() {
     setAnalyzing(true);
     setAnalysis(null);
     try {
-      const uploadData = new FormData();
-      uploadData.append("file", photoFile);
-      const uploadResponse = await fetch("/api/photos", {
-        method: "POST",
-        body: uploadData,
-      });
-      const uploaded = (await uploadResponse.json()) as {
-        photoId?: string;
-        error?: string;
-      };
-      if (!uploadResponse.ok || !uploaded.photoId) {
-        throw new Error(uploaded.error ?? "사진을 올리지 못했습니다.");
-      }
-
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ photoId: uploaded.photoId }),
-      });
-      const body = (await response.json()) as AnalysisResult & { error?: string };
-      if (!response.ok) throw new Error(body.error ?? "사진을 분석하지 못했습니다.");
-      setAnalysis(body);
+      setAnalysis(await client.analyzePhoto(photoFile));
     } catch (error) {
       showToast(
         error instanceof Error
@@ -524,8 +570,7 @@ export function NutritionDashboard() {
       return;
     }
     try {
-      const response = await fetch(`/api/meals/${meal.id}`, { method: "DELETE" });
-      if (!response.ok) throw new Error("삭제하지 못했습니다.");
+      await client.deleteMeal(meal.id);
       setMeals((current) => current.filter((item) => item.id !== meal.id));
       showToast("기록을 삭제했어요.");
     } catch (error) {
@@ -556,8 +601,23 @@ export function NutritionDashboard() {
             인사이트
           </button>
         </nav>
-        <div className="profile-dot" aria-label="개인 기록">
-          나
+        <div className="profile-actions">
+          <div
+            className="profile-dot"
+            aria-label="개인 기록"
+            title={userEmail}
+          >
+            {userEmail?.slice(0, 1).toUpperCase() ?? "나"}
+          </div>
+          {onSignOut && (
+            <button
+              className="sign-out-button"
+              type="button"
+              onClick={() => void onSignOut()}
+            >
+              로그아웃
+            </button>
+          )}
         </div>
       </header>
 

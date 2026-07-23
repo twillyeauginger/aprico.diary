@@ -1,0 +1,7 @@
+project_id = "nutrition-diary"
+
+[functions.analyze-photo]
+verify_jwt = false
+
+[functions.search-foods]
+verify_jwt = false
