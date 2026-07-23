@@ -12,12 +12,12 @@ test("ships the nutrition journal instead of the starter preview", async () => {
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
   ]);
 
-  assert.match(dashboard, /한끼록/);
-  assert.match(dashboard, /먹은 것을 가볍게/);
+  assert.match(dashboard, /식단 기록/);
+  assert.match(dashboard, /오늘의 식단과/);
   assert.match(dashboard, /음식 추가하기/);
   assert.match(dashboard, /검증 DB/);
-  assert.match(layout, /한끼록 — 나의 영양 기록/);
-  assert.match(layout, /\/og\.png/);
+  assert.match(layout, /title: "식단 기록"/);
+  assert.doesNotMatch(layout, /og\.png|openGraph|twitter/);
   assert.match(page, /NutritionDashboard/);
   await assert.rejects(
     access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)),

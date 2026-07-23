@@ -542,9 +542,8 @@ export function NutritionDashboard() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="brand" aria-label="한끼록 홈">
-          <span className="brand-mark">한</span>
-          한끼록
+        <div className="brand" aria-label="식단 기록 홈">
+          식단 기록
         </div>
         <nav className="top-nav" aria-label="주요 메뉴">
           <button className="active" type="button">
@@ -564,17 +563,17 @@ export function NutritionDashboard() {
 
       <section className="hero">
         <div>
-          <p className="eyebrow">My nutrition journal</p>
+          <p className="eyebrow">식단 캘린더</p>
           <h1>
-            먹은 것을 가볍게,
+            오늘의 식단과
             <br />
-            영양은 분명하게.
+            영양정보를 기록하세요.
           </h1>
         </div>
         <div>
           <p className="hero-copy">
-            사진 한 장이나 제품명만으로 기록을 시작하세요. 확인한 영양정보와
-            추정값을 구분해 보여드려요.
+            음식 사진, 제품 검색, 직접 입력으로 기록할 수 있습니다. 확인된
+            영양정보와 추정값은 서로 구분해 표시합니다.
           </p>
           <div className="source-legend" aria-label="데이터 출처">
             <span className="source-pill">검증 DB</span>
