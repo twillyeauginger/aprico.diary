@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { parse as parseExif } from "exifr";
 import Skeleton from "react-loading-skeleton";
 import "react-loading-skeleton/dist/skeleton.css";
 
@@ -14,6 +15,7 @@ export type SourceType =
 export type MealRecord = {
   id: number | string;
   mealDate: string;
+  mealTime?: string;
   mealType: string;
   foodName: string;
   sourceType: SourceType;
@@ -353,8 +355,12 @@ function demoMeals(today: Date): MealRecord[] {
 }
 
 function emptyManual(selectedDate: string) {
+  const now = new Date();
   return {
     mealDate: selectedDate,
+    mealTime: `${String(now.getHours()).padStart(2, "0")}:${String(
+      now.getMinutes(),
+    ).padStart(2, "0")}`,
     mealType: "점심",
     foodName: "",
     servingAmount: "1",
@@ -452,6 +458,11 @@ export function NutritionDashboard({
   const [searching, setSearching] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState("");
+  const [photoDate, setPhotoDate] = useState(selectedDate);
+  const [photoTime, setPhotoTime] = useState("");
+  const [photoDateSource, setPhotoDateSource] = useState<"exif" | "selected">(
+    "selected",
+  );
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [toast, setToast] = useState("");
@@ -549,7 +560,10 @@ export function NutritionDashboard({
   }, [viewMonth]);
 
   const selectedMeals = useMemo(
-    () => meals.filter((meal) => meal.mealDate === selectedDate),
+    () =>
+      meals
+        .filter((meal) => meal.mealDate === selectedDate)
+        .sort((a, b) => (a.mealTime ?? "").localeCompare(b.mealTime ?? "")),
     [meals, selectedDate],
   );
   const selectedTotals = useMemo(
@@ -596,7 +610,11 @@ export function NutritionDashboard({
           meal.foodName.toLocaleLowerCase("ko").includes(normalized) ||
           meal.mealType.toLocaleLowerCase("ko").includes(normalized),
       )
-      .sort((a, b) => b.mealDate.localeCompare(a.mealDate));
+      .sort(
+        (a, b) =>
+          b.mealDate.localeCompare(a.mealDate) ||
+          (b.mealTime ?? "").localeCompare(a.mealTime ?? ""),
+      );
   }, [allMeals, foodListQuery]);
 
   function showToast(message: string) {
@@ -636,6 +654,7 @@ export function NutritionDashboard({
     try {
       await saveMeal({
         mealDate: manual.mealDate,
+        mealTime: manual.mealTime,
         mealType: manual.mealType,
         foodName: manual.foodName.trim(),
         sourceType: "manual",
@@ -660,6 +679,7 @@ export function NutritionDashboard({
     setEditingMeal(meal);
     setEditForm({
       mealDate: meal.mealDate,
+      mealTime: meal.mealTime ?? "",
       mealType: meal.mealType,
       foodName: meal.foodName,
       servingAmount: String(meal.servingAmount),
@@ -681,6 +701,7 @@ export function NutritionDashboard({
     try {
       const updated = await client.updateMeal(editingMeal.id, {
         mealDate: editForm.mealDate,
+        mealTime: editForm.mealTime,
         mealType: editForm.mealType,
         foodName: editForm.foodName.trim(),
         sourceType: "manual",
@@ -785,6 +806,7 @@ export function NutritionDashboard({
     try {
       await saveMeal({
         mealDate: selectedDate,
+        mealTime: new Date().toTimeString().slice(0, 5),
         mealType: "점심",
         foodName: food.name,
         sourceType: "manual",
@@ -821,6 +843,7 @@ export function NutritionDashboard({
     try {
       await saveMeal({
         mealDate: selectedDate,
+        mealTime: new Date().toTimeString().slice(0, 5),
         mealType: "점심",
         foodName: food.name,
         sourceType: food.sourceType,
@@ -841,13 +864,33 @@ export function NutritionDashboard({
     }
   }
 
-  function handlePhotoChange(event: React.ChangeEvent<HTMLInputElement>) {
+  async function handlePhotoChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
     if (photoPreview) URL.revokeObjectURL(photoPreview);
     setPhotoFile(file);
     setPhotoPreview(URL.createObjectURL(file));
     setAnalysis(null);
+    setPhotoDate(selectedDate);
+    setPhotoTime("");
+    setPhotoDateSource("selected");
+    try {
+      const metadata = (await parseExif(file, {
+        pick: ["DateTimeOriginal", "CreateDate"],
+      })) as { DateTimeOriginal?: Date; CreateDate?: Date } | undefined;
+      const capturedAt = metadata?.DateTimeOriginal ?? metadata?.CreateDate;
+      if (capturedAt instanceof Date && !Number.isNaN(capturedAt.getTime())) {
+        setPhotoDate(dateKey(capturedAt));
+        setPhotoTime(
+          `${String(capturedAt.getHours()).padStart(2, "0")}:${String(
+            capturedAt.getMinutes(),
+          ).padStart(2, "0")}`,
+        );
+        setPhotoDateSource("exif");
+      }
+    } catch {
+      // Some edited or downloaded images do not contain EXIF capture time.
+    }
   }
 
   async function analyzePhoto() {
@@ -873,7 +916,8 @@ export function NutritionDashboard({
       for (const item of analysis.items) {
         await saveMeal(
           {
-            mealDate: selectedDate,
+            mealDate: photoDate,
+            mealTime: photoTime,
             mealType: "점심",
             foodName: item.name,
             sourceType: item.sourceType,
@@ -1212,6 +1256,12 @@ export function NutritionDashboard({
                     <h3 className="meal-name">{meal.foodName}</h3>
                     <div className="meal-meta">
                       <span>{meal.mealType}</span>
+                      {meal.mealTime && (
+                        <>
+                          <span>·</span>
+                          <span>{meal.mealTime}</span>
+                        </>
+                      )}
                       <span>·</span>
                       <span>
                         {meal.servingAmount}
@@ -1430,6 +1480,41 @@ export function NutritionDashboard({
                     사진은 비공개 저장소에 보관됩니다. 분석 결과는 바로 저장되지
                     않으며, 확인 후 기록에 반영됩니다.
                   </p>
+                  {photoFile && (
+                    <>
+                      <div className="field-row">
+                        <div className="field">
+                          <label htmlFor="photo-meal-date">먹은 날짜</label>
+                          <input
+                            id="photo-meal-date"
+                            type="date"
+                            value={photoDate}
+                            onChange={(event) => {
+                              setPhotoDate(event.target.value);
+                              setPhotoDateSource("selected");
+                            }}
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="photo-meal-time">먹은 시간</label>
+                          <input
+                            id="photo-meal-time"
+                            type="time"
+                            value={photoTime}
+                            onChange={(event) => {
+                              setPhotoTime(event.target.value);
+                              setPhotoDateSource("selected");
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <p className="photo-time-note">
+                        {photoDateSource === "exif"
+                          ? "사진의 촬영 날짜와 시간을 가져왔어요. 실제 식사 시간과 다르면 수정해주세요."
+                          : "사진에 촬영 시간이 없어 선택한 날짜를 사용합니다. 시간을 확인해주세요."}
+                      </p>
+                    </>
+                  )}
                   <button
                     className="primary-button wide-button"
                     type="button"
@@ -1496,6 +1581,17 @@ export function NutritionDashboard({
                         value={manual.mealDate}
                         onChange={(event) =>
                           setManual({ ...manual, mealDate: event.target.value })
+                        }
+                      />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="meal-time">먹은 시간</label>
+                      <input
+                        id="meal-time"
+                        type="time"
+                        value={manual.mealTime}
+                        onChange={(event) =>
+                          setManual({ ...manual, mealTime: event.target.value })
                         }
                       />
                     </div>
@@ -1649,6 +1745,17 @@ export function NutritionDashboard({
                       <option key={type}>{type}</option>
                     ))}
                   </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="edit-meal-time">먹은 시간</label>
+                  <input
+                    id="edit-meal-time"
+                    type="time"
+                    value={editForm.mealTime}
+                    onChange={(event) =>
+                      setEditForm({ ...editForm, mealTime: event.target.value })
+                    }
+                  />
                 </div>
               </div>
               <div className="field">
@@ -1882,6 +1989,7 @@ function FoodListPanel({
                 <th>날짜</th>
                 <th>음식</th>
                 <th>식사</th>
+                <th>먹은 시간</th>
                 <th>섭취량</th>
                 <th>영양 구성</th>
                 <th>열량·단백질 밀도</th>
@@ -1897,6 +2005,7 @@ function FoodListPanel({
                     <strong>{meal.foodName}</strong>
                   </td>
                   <td>{meal.mealType}</td>
+                  <td>{meal.mealTime || "—"}</td>
                   <td>{meal.servingAmount}{meal.servingUnit}</td>
                   <td>
                     <MacroBar

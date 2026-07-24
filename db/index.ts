@@ -29,6 +29,7 @@ export function ensureSchema() {
         CREATE TABLE IF NOT EXISTS meal_entries (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           meal_date TEXT NOT NULL,
+          meal_time TEXT,
           meal_type TEXT NOT NULL,
           food_name TEXT NOT NULL,
           source_type TEXT NOT NULL,

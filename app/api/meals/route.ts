@@ -88,6 +88,7 @@ export async function POST(request: Request) {
       .insert(mealEntries)
       .values({
         mealDate,
+        mealTime: String(body.mealTime ?? "").slice(0, 5) || null,
         mealType: String(body.mealType ?? "기타").slice(0, 20),
         foodName: foodName.slice(0, 120),
         sourceType,

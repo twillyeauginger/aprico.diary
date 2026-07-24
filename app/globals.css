@@ -1230,6 +1230,13 @@ button {
   line-height: 1.6;
 }
 
+.photo-time-note {
+  margin: -4px 0 14px;
+  color: var(--sage-dark);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
 .upload-zone {
   position: relative;
   display: grid;

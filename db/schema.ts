@@ -6,6 +6,7 @@ export const mealEntries = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     mealDate: text("meal_date").notNull(),
+    mealTime: text("meal_time"),
     mealType: text("meal_type").notNull(),
     foodName: text("food_name").notNull(),
     sourceType: text("source_type").notNull(),

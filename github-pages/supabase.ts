@@ -33,6 +33,7 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
 type MealRow = {
   id: string;
   meal_date: string;
+  meal_time: string | null;
   meal_type: string;
   food_name: string;
   source_type: SourceType;
@@ -99,6 +100,7 @@ function rowToMeal(row: MealRow): MealRecord {
   return {
     id: row.id,
     mealDate: row.meal_date,
+    mealTime: row.meal_time?.slice(0, 5) ?? "",
     mealType: row.meal_type,
     foodName: row.food_name,
     sourceType: row.source_type,
@@ -169,6 +171,7 @@ export function createSupabaseNutritionClient(
         .gte("meal_date", `${month}-01`)
         .lt("meal_date", nextMonth(month))
         .order("meal_date", { ascending: true })
+        .order("meal_time", { ascending: true, nullsFirst: false })
         .order("created_at", { ascending: true });
       if (error) throw new Error(`기록을 불러오지 못했습니다: ${error.message}`);
       return ((data ?? []) as MealRow[]).map(rowToMeal);
@@ -179,6 +182,7 @@ export function createSupabaseNutritionClient(
         .from("meals")
         .select("*")
         .order("meal_date", { ascending: false })
+        .order("meal_time", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false });
       if (error) throw new Error(`음식 목록을 불러오지 못했습니다: ${error.message}`);
       return ((data ?? []) as MealRow[]).map(rowToMeal);
@@ -191,6 +195,7 @@ export function createSupabaseNutritionClient(
         .insert({
           user_id: user.id,
           meal_date: payload.mealDate,
+          meal_time: payload.mealTime || null,
           meal_type: payload.mealType,
           food_name: payload.foodName,
           source_type: payload.sourceType,
@@ -218,6 +223,7 @@ export function createSupabaseNutritionClient(
         .from("meals")
         .update({
           meal_date: payload.mealDate,
+          meal_time: payload.mealTime || null,
           meal_type: payload.mealType,
           food_name: payload.foodName,
           source_type: "manual",
