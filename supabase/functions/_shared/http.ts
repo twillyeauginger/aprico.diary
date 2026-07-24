@@ -5,22 +5,44 @@ const localOrigins = new Set([
   "http://localhost:5173",
 ]);
 
+const defaultOrigins = [
+  "https://twillyeauginger.github.io",
+  "https://hankkirok-nutrition.dingdeee.chatgpt.site",
+];
+
+function normalizeOrigin(value: string) {
+  try {
+    return new URL(value.trim()).origin;
+  } catch {
+    return "";
+  }
+}
+
+function allowedOrigins() {
+  const configured = [
+    Deno.env.get("APP_ORIGIN") ?? "",
+    ...(Deno.env.get("APP_ORIGINS") ?? "").split(","),
+  ];
+  return new Set(
+    [...localOrigins, ...defaultOrigins, ...configured]
+      .map(normalizeOrigin)
+      .filter(Boolean),
+  );
+}
+
 export function requestOriginAllowed(request: Request) {
   const origin = request.headers.get("origin");
   if (!origin) return true;
-  const appOrigin = Deno.env.get("APP_ORIGIN")?.replace(/\/+$/, "");
-  return localOrigins.has(origin) || Boolean(appOrigin && origin === appOrigin);
+  return allowedOrigins().has(normalizeOrigin(origin));
 }
 
 export function corsHeaders(request: Request) {
   const origin = request.headers.get("origin");
-  const appOrigin =
-    Deno.env.get("APP_ORIGIN")?.replace(/\/+$/, "") ??
-    "https://twillyeauginger.github.io";
+  const origins = allowedOrigins();
   const allowedOrigin =
-    origin && (localOrigins.has(origin) || origin === appOrigin)
-      ? origin
-      : appOrigin;
+    origin && origins.has(normalizeOrigin(origin))
+      ? normalizeOrigin(origin)
+      : defaultOrigins[0];
   return {
     "access-control-allow-origin": allowedOrigin,
     "access-control-allow-headers":

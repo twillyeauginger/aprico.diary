@@ -52,6 +52,27 @@ export function ensureSchema() {
         ON meal_entries (meal_date)
       `),
       database.prepare(`
+        CREATE TABLE IF NOT EXISTS saved_foods (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          serving_amount REAL NOT NULL DEFAULT 1,
+          serving_unit TEXT NOT NULL DEFAULT '인분',
+          calories REAL NOT NULL DEFAULT 0,
+          carbs REAL NOT NULL DEFAULT 0,
+          protein REAL NOT NULL DEFAULT 0,
+          fat REAL NOT NULL DEFAULT 0,
+          sugar REAL NOT NULL DEFAULT 0,
+          sodium REAL NOT NULL DEFAULT 0,
+          fiber REAL NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `),
+      database.prepare(`
+        CREATE INDEX IF NOT EXISTS saved_foods_name_idx
+        ON saved_foods (name)
+      `),
+      database.prepare(`
         CREATE TABLE IF NOT EXISTS photos (
           id TEXT PRIMARY KEY,
           object_key TEXT NOT NULL UNIQUE,

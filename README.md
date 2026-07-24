@@ -53,7 +53,8 @@ Edge Function 비밀값은 Supabase에만 설정합니다.
 - `OPENAI_API_KEY`: 음식 사진 분석
 - `OPENAI_MODEL`: 이미지 분석 모델, 기본값 `gpt-5.6-sol`
 - `FOOD_DB_API_KEY`: 식약처 식품영양성분 DB 검색
-- `APP_ORIGIN`: `https://twillyeauginger.github.io`
+- `APP_ORIGIN`: 기본 허용 주소, `https://twillyeauginger.github.io`
+- `APP_ORIGINS`: 추가 허용 주소를 쉼표로 구분
 
 `OPENAI_API_KEY`와 `FOOD_DB_API_KEY`는 GitHub 변수나 프런트엔드 코드에
 넣지 않습니다.

@@ -26,6 +26,26 @@ export const mealEntries = sqliteTable(
   (table) => [index("meal_entries_date_idx").on(table.mealDate)],
 );
 
+export const savedFoods = sqliteTable(
+  "saved_foods",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    servingAmount: real("serving_amount").notNull().default(1),
+    servingUnit: text("serving_unit").notNull().default("인분"),
+    calories: real("calories").notNull().default(0),
+    carbs: real("carbs").notNull().default(0),
+    protein: real("protein").notNull().default(0),
+    fat: real("fat").notNull().default(0),
+    sugar: real("sugar").notNull().default(0),
+    sodium: real("sodium").notNull().default(0),
+    fiber: real("fiber").notNull().default(0),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("saved_foods_name_idx").on(table.name)],
+);
+
 export const photos = sqliteTable("photos", {
   id: text("id").primaryKey(),
   objectKey: text("object_key").notNull().unique(),

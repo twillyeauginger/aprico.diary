@@ -15,6 +15,13 @@
       "when": 1784809577899,
       "tag": "0001_freezing_red_wolf",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784908642621,
+      "tag": "0002_spooky_sunfire",
+      "breakpoints": true
     }
   ]
 }

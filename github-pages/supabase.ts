@@ -9,6 +9,8 @@ import type {
   MealInput,
   MealRecord,
   NutritionClient,
+  SavedFood,
+  SavedFoodInput,
   SourceType,
 } from "../app/nutrition-dashboard";
 
@@ -47,6 +49,51 @@ type MealRow = {
   confidence: number | null;
   photo_path: string | null;
 };
+
+type SavedFoodRow = {
+  id: string;
+  name: string;
+  serving_amount: number;
+  serving_unit: string;
+  calories: number;
+  carbs: number;
+  protein: number;
+  fat: number;
+  sugar: number;
+  sodium: number;
+  fiber: number;
+};
+
+function rowToSavedFood(row: SavedFoodRow): SavedFood {
+  return {
+    id: row.id,
+    name: row.name,
+    servingAmount: Number(row.serving_amount),
+    servingUnit: row.serving_unit,
+    calories: Number(row.calories),
+    carbs: Number(row.carbs),
+    protein: Number(row.protein),
+    fat: Number(row.fat),
+    sugar: Number(row.sugar),
+    sodium: Number(row.sodium),
+    fiber: Number(row.fiber),
+  };
+}
+
+function savedFoodValues(payload: SavedFoodInput) {
+  return {
+    name: payload.name,
+    serving_amount: payload.servingAmount,
+    serving_unit: payload.servingUnit,
+    calories: payload.calories,
+    carbs: payload.carbs,
+    protein: payload.protein,
+    fat: payload.fat,
+    sugar: payload.sugar,
+    sodium: payload.sodium,
+    fiber: payload.fiber,
+  };
+}
 
 function rowToMeal(row: MealRow): MealRecord {
   return {
@@ -197,6 +244,42 @@ export function createSupabaseNutritionClient(
     async deleteMeal(id) {
       const { error } = await client.from("meals").delete().eq("id", id);
       if (error) throw new Error(`기록을 삭제하지 못했습니다: ${error.message}`);
+    },
+
+    async listSavedFoods() {
+      const { data, error } = await client
+        .from("saved_foods")
+        .select("*")
+        .order("name");
+      if (error) throw new Error(`내 음식 DB를 불러오지 못했습니다: ${error.message}`);
+      return ((data ?? []) as SavedFoodRow[]).map(rowToSavedFood);
+    },
+
+    async createSavedFood(payload) {
+      const user = await requireUser(client);
+      const { data, error } = await client
+        .from("saved_foods")
+        .insert({ user_id: user.id, ...savedFoodValues(payload) })
+        .select("*")
+        .single();
+      if (error) throw new Error(`음식을 저장하지 못했습니다: ${error.message}`);
+      return rowToSavedFood(data as SavedFoodRow);
+    },
+
+    async updateSavedFood(id, payload) {
+      const { data, error } = await client
+        .from("saved_foods")
+        .update(savedFoodValues(payload))
+        .eq("id", id)
+        .select("*")
+        .single();
+      if (error) throw new Error(`음식을 수정하지 못했습니다: ${error.message}`);
+      return rowToSavedFood(data as SavedFoodRow);
+    },
+
+    async deleteSavedFood(id) {
+      const { error } = await client.from("saved_foods").delete().eq("id", id);
+      if (error) throw new Error(`음식을 삭제하지 못했습니다: ${error.message}`);
     },
 
     async searchFoods(query) {

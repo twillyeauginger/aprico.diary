@@ -437,6 +437,134 @@ button {
   font-size: 10px;
 }
 
+.macro-visual {
+  min-width: 210px;
+}
+
+.macro-bar {
+  display: flex;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--paper-deep);
+}
+
+.macro-bar span {
+  min-width: 2px;
+}
+
+.macro-carbs {
+  background: #d6a463;
+}
+
+.macro-protein {
+  background: var(--sage);
+}
+
+.macro-fat {
+  background: var(--apricot);
+}
+
+.macro-values {
+  display: flex;
+  gap: 10px;
+  margin-top: 7px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.macro-values .carbs {
+  color: #9a6d32;
+}
+
+.macro-values .protein {
+  color: var(--sage-dark);
+}
+
+.macro-values .fat {
+  color: #a66037;
+}
+
+.density-cell {
+  display: grid;
+  gap: 4px;
+}
+
+.density-cell strong {
+  color: var(--ink);
+}
+
+.density-cell span {
+  color: var(--sage-dark);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.saved-food-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.saved-food-card {
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.saved-food-card-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.saved-food-card-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.saved-food-card-head p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.saved-food-card-head > strong {
+  color: var(--sage-dark);
+  font-size: 22px;
+  white-space: nowrap;
+}
+
+.saved-food-card-head small {
+  font-size: 10px;
+}
+
+.saved-food-actions {
+  display: flex;
+  gap: 7px;
+  margin-top: 18px;
+}
+
+.saved-food-actions button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--white);
+  padding: 8px 11px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.saved-food-actions button:first-child {
+  border-color: var(--sage-dark);
+  background: var(--sage-dark);
+  color: white;
+}
+
 .table-edit-button {
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -1240,6 +1368,10 @@ button {
   }
 
   .insights-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .saved-food-grid {
     grid-template-columns: 1fr;
   }
 

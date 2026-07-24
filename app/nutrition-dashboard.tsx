@@ -77,12 +77,35 @@ export type AnalysisResult = {
 
 export type MealInput = Omit<MealRecord, "id" | "demo">;
 
+export type SavedFood = {
+  id: number | string;
+  name: string;
+  servingAmount: number;
+  servingUnit: string;
+  calories: number;
+  carbs: number;
+  protein: number;
+  fat: number;
+  sugar: number;
+  sodium: number;
+  fiber: number;
+};
+
+export type SavedFoodInput = Omit<SavedFood, "id">;
+
 export type NutritionClient = {
   listMeals(month: string): Promise<MealRecord[]>;
   listAllMeals(): Promise<MealRecord[]>;
   createMeal(payload: MealInput): Promise<MealRecord>;
   updateMeal(id: MealRecord["id"], payload: MealInput): Promise<MealRecord>;
   deleteMeal(id: MealRecord["id"]): Promise<void>;
+  listSavedFoods(): Promise<SavedFood[]>;
+  createSavedFood(payload: SavedFoodInput): Promise<SavedFood>;
+  updateSavedFood(
+    id: SavedFood["id"],
+    payload: SavedFoodInput,
+  ): Promise<SavedFood>;
+  deleteSavedFood(id: SavedFood["id"]): Promise<void>;
   searchFoods(query: string): Promise<FoodResult[]>;
   analyzePhoto(file: File): Promise<AnalysisResult>;
 };
@@ -132,6 +155,36 @@ const legacyNutritionClient: NutritionClient = {
   },
   async deleteMeal(id) {
     const response = await fetch(`/api/meals/${id}`, { method: "DELETE" });
+    if (!response.ok) throw new Error("삭제하지 못했습니다.");
+  },
+  async listSavedFoods() {
+    const response = await fetch("/api/saved-foods");
+    if (!response.ok) throw new Error("내 음식 DB를 불러오지 못했습니다.");
+    const body = (await response.json()) as { foods: SavedFood[] };
+    return body.foods;
+  },
+  async createSavedFood(payload) {
+    const response = await fetch("/api/saved-foods", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = (await response.json()) as { food?: SavedFood; error?: string };
+    if (!response.ok || !body.food) throw new Error(body.error ?? "저장하지 못했습니다.");
+    return body.food;
+  },
+  async updateSavedFood(id, payload) {
+    const response = await fetch(`/api/saved-foods/${id}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = (await response.json()) as { food?: SavedFood; error?: string };
+    if (!response.ok || !body.food) throw new Error(body.error ?? "수정하지 못했습니다.");
+    return body.food;
+  },
+  async deleteSavedFood(id) {
+    const response = await fetch(`/api/saved-foods/${id}`, { method: "DELETE" });
     if (!response.ok) throw new Error("삭제하지 못했습니다.");
   },
   async searchFoods(query) {
@@ -316,6 +369,21 @@ function emptyManual(selectedDate: string) {
   };
 }
 
+function emptySavedFood() {
+  return {
+    name: "",
+    servingAmount: "1",
+    servingUnit: "인분",
+    calories: "",
+    carbs: "",
+    protein: "",
+    fat: "",
+    sugar: "",
+    sodium: "",
+    fiber: "",
+  };
+}
+
 function sumNutrition(rows: MealRecord[]) {
   return rows.reduce(
     (total, row) => ({
@@ -356,7 +424,7 @@ export function NutritionDashboard({
   );
   const [selectedDate, setSelectedDate] = useState(dateKey(today));
   const [activeView, setActiveView] = useState<
-    "calendar" | "foods" | "insights"
+    "calendar" | "foods" | "foodDb" | "insights"
   >("calendar");
   const [meals, setMeals] = useState<MealRecord[]>([]);
   const [isDemo, setIsDemo] = useState(false);
@@ -371,6 +439,14 @@ export function NutritionDashboard({
   const [allMeals, setAllMeals] = useState<MealRecord[]>([]);
   const [foodListLoading, setFoodListLoading] = useState(false);
   const [foodListQuery, setFoodListQuery] = useState("");
+  const [savedFoods, setSavedFoods] = useState<SavedFood[]>([]);
+  const [savedFoodsLoading, setSavedFoodsLoading] = useState(false);
+  const [savedFoodEditor, setSavedFoodEditor] = useState<SavedFood | "new" | null>(
+    null,
+  );
+  const [savedFoodForm, setSavedFoodForm] = useState(() =>
+    emptySavedFood(),
+  );
   const [query, setQuery] = useState("");
   const [foodResults, setFoodResults] = useState<FoodResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -425,6 +501,31 @@ export function NutritionDashboard({
       })
       .finally(() => {
         if (!cancelled) setFoodListLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView, client]);
+
+  useEffect(() => {
+    if (activeView !== "foodDb") return;
+    let cancelled = false;
+    client
+      .listSavedFoods()
+      .then((foods) => {
+        if (!cancelled) setSavedFoods(foods);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          showToast(
+            error instanceof Error
+              ? error.message
+              : "내 음식 DB를 불러오지 못했습니다.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSavedFoodsLoading(false);
       });
     return () => {
       cancelled = true;
@@ -611,6 +712,98 @@ export function NutritionDashboard({
     }
   }
 
+  function savedFoodPayload(): SavedFoodInput {
+    return {
+      name: savedFoodForm.name.trim(),
+      servingAmount: Number(savedFoodForm.servingAmount) || 1,
+      servingUnit: savedFoodForm.servingUnit || "인분",
+      calories: Number(savedFoodForm.calories) || 0,
+      carbs: Number(savedFoodForm.carbs) || 0,
+      protein: Number(savedFoodForm.protein) || 0,
+      fat: Number(savedFoodForm.fat) || 0,
+      sugar: Number(savedFoodForm.sugar) || 0,
+      sodium: Number(savedFoodForm.sodium) || 0,
+      fiber: Number(savedFoodForm.fiber) || 0,
+    };
+  }
+
+  function openSavedFoodEditor(food?: SavedFood) {
+    setSavedFoodEditor(food ?? "new");
+    setSavedFoodForm(
+      food
+        ? {
+            name: food.name,
+            servingAmount: String(food.servingAmount),
+            servingUnit: food.servingUnit,
+            calories: String(food.calories),
+            carbs: String(food.carbs),
+            protein: String(food.protein),
+            fat: String(food.fat),
+            sugar: String(food.sugar),
+            sodium: String(food.sodium),
+            fiber: String(food.fiber),
+          }
+        : emptySavedFood(),
+    );
+  }
+
+  async function handleSavedFoodSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!savedFoodForm.name.trim()) return;
+    try {
+      if (savedFoodEditor === "new") {
+        const created = await client.createSavedFood(savedFoodPayload());
+        setSavedFoods((current) => [created, ...current]);
+        showToast("내 음식 DB에 저장했어요.");
+      } else if (savedFoodEditor) {
+        const updated = await client.updateSavedFood(
+          savedFoodEditor.id,
+          savedFoodPayload(),
+        );
+        setSavedFoods((current) =>
+          current.map((food) => (food.id === updated.id ? updated : food)),
+        );
+        showToast("음식 정보를 수정했어요.");
+      }
+      setSavedFoodEditor(null);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "저장하지 못했습니다.");
+    }
+  }
+
+  async function deleteSavedFood(food: SavedFood) {
+    try {
+      await client.deleteSavedFood(food.id);
+      setSavedFoods((current) => current.filter((item) => item.id !== food.id));
+      showToast("내 음식 DB에서 삭제했어요.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "삭제하지 못했습니다.");
+    }
+  }
+
+  async function addSavedFoodToMeal(food: SavedFood) {
+    try {
+      await saveMeal({
+        mealDate: selectedDate,
+        mealType: "점심",
+        foodName: food.name,
+        sourceType: "manual",
+        sourceLabel: "내 음식 DB",
+        servingAmount: food.servingAmount,
+        servingUnit: food.servingUnit,
+        calories: food.calories,
+        carbs: food.carbs,
+        protein: food.protein,
+        fat: food.fat,
+        sugar: food.sugar,
+        sodium: food.sodium,
+        fiber: food.fiber,
+      });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "추가하지 못했습니다.");
+    }
+  }
+
   async function handleSearch(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!query.trim()) return;
@@ -763,7 +956,17 @@ export function NutritionDashboard({
               setActiveView("foods");
             }}
           >
-            음식 목록
+            식사 기록
+          </button>
+          <button
+            className={activeView === "foodDb" ? "active" : ""}
+            type="button"
+            onClick={() => {
+              setSavedFoodsLoading(true);
+              setActiveView("foodDb");
+            }}
+          >
+            내 음식 DB
           </button>
           <button
             className={activeView === "insights" ? "active" : ""}
@@ -833,7 +1036,7 @@ export function NutritionDashboard({
         </div>
       )}
 
-      {activeView !== "foods" && <section
+      {(activeView === "calendar" || activeView === "insights") && <section
         className="summary-grid"
         aria-label={activeView === "calendar" ? "선택한 날짜 영양 요약" : "월간 영양 요약"}
       >
@@ -1068,13 +1271,22 @@ export function NutritionDashboard({
           insights={monthInsights}
           onChangeMonth={changeMonth}
         />
-      ) : (
+      ) : activeView === "foods" ? (
         <FoodListPanel
           loading={foodListLoading}
           meals={filteredAllMeals}
           query={foodListQuery}
           onQueryChange={setFoodListQuery}
           onEdit={openEdit}
+        />
+      ) : (
+        <SavedFoodPanel
+          foods={savedFoods}
+          loading={savedFoodsLoading}
+          onAdd={() => openSavedFoodEditor()}
+          onAddToMeal={addSavedFoodToMeal}
+          onDelete={deleteSavedFood}
+          onEdit={openSavedFoodEditor}
         />
       )}
 
@@ -1505,6 +1717,105 @@ export function NutritionDashboard({
           </section>
         </div>
       )}
+      {savedFoodEditor && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) setSavedFoodEditor(null);
+          }}
+        >
+          <section
+            aria-labelledby="saved-food-editor-title"
+            aria-modal="true"
+            className="modal"
+            role="dialog"
+          >
+            <div className="modal-header">
+              <div>
+                <h2 id="saved-food-editor-title">
+                  {savedFoodEditor === "new" ? "내 음식 등록" : "내 음식 수정"}
+                </h2>
+                <p>먹은 날짜와 무관한 1회 섭취 기준 정보입니다.</p>
+              </div>
+              <button
+                className="close-button"
+                type="button"
+                aria-label="닫기"
+                onClick={() => setSavedFoodEditor(null)}
+              >
+                ×
+              </button>
+            </div>
+            <form className="tab-content" onSubmit={handleSavedFoodSubmit}>
+              <div className="field">
+                <label htmlFor="saved-food-name">음식 이름</label>
+                <input
+                  id="saved-food-name"
+                  required
+                  value={savedFoodForm.name}
+                  onChange={(event) =>
+                    setSavedFoodForm({ ...savedFoodForm, name: event.target.value })
+                  }
+                />
+              </div>
+              <div className="field-row">
+                <div className="field">
+                  <label htmlFor="saved-serving-amount">1회 섭취량</label>
+                  <input
+                    id="saved-serving-amount"
+                    inputMode="decimal"
+                    value={savedFoodForm.servingAmount}
+                    onChange={(event) =>
+                      setSavedFoodForm({
+                        ...savedFoodForm,
+                        servingAmount: event.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="saved-serving-unit">단위</label>
+                  <input
+                    id="saved-serving-unit"
+                    value={savedFoodForm.servingUnit}
+                    onChange={(event) =>
+                      setSavedFoodForm({
+                        ...savedFoodForm,
+                        servingUnit: event.target.value,
+                      })
+                    }
+                  />
+                </div>
+              </div>
+              <div className="field-row">
+                {[
+                  ["calories", "열량 (kcal)"],
+                  ["carbs", "탄수화물 (g)"],
+                  ["protein", "단백질 (g)"],
+                  ["fat", "지방 (g)"],
+                  ["sugar", "당류 (g)"],
+                  ["sodium", "나트륨 (mg)"],
+                  ["fiber", "식이섬유 (g)"],
+                ].map(([key, label]) => (
+                  <NutrientField
+                    id={`saved-${key}`}
+                    key={key}
+                    label={label}
+                    value={savedFoodForm[key as keyof typeof savedFoodForm]}
+                    onChange={(value) =>
+                      setSavedFoodForm({ ...savedFoodForm, [key]: value })
+                    }
+                  />
+                ))}
+              </div>
+              <button className="primary-button wide-button" type="submit">
+                {savedFoodEditor === "new" ? "내 음식 DB에 저장" : "수정 내용 저장"}
+              </button>
+            </form>
+          </section>
+        </div>
+      )}
       {toast && (
         <div className="toast" role="status">
           {toast}
@@ -1532,8 +1843,8 @@ function FoodListPanel({
       <div className="food-list-heading">
         <div>
           <p className="eyebrow">내 식사 기록</p>
-          <h2 id="food-list-title">먹은 음식 목록</h2>
-          <p>날짜와 관계없이 모든 기록을 모아보고 수정할 수 있습니다.</p>
+          <h2 id="food-list-title">실제로 먹은 음식</h2>
+          <p>영양 비율과 밀도를 비교해 어떤 음식이 나에게 잘 맞았는지 살펴보세요.</p>
         </div>
         <label className="food-list-search">
           <span className="sr-only">음식 검색</span>
@@ -1572,7 +1883,8 @@ function FoodListPanel({
                 <th>음식</th>
                 <th>식사</th>
                 <th>섭취량</th>
-                <th>열량</th>
+                <th>영양 구성</th>
+                <th>열량·단백질 밀도</th>
                 <th>출처</th>
                 <th><span className="sr-only">작업</span></th>
               </tr>
@@ -1583,14 +1895,28 @@ function FoodListPanel({
                   <td>{meal.mealDate}</td>
                   <td>
                     <strong>{meal.foodName}</strong>
-                    <small>
-                      탄 {Math.round(meal.carbs)} · 단 {Math.round(meal.protein)} · 지{" "}
-                      {Math.round(meal.fat)}g
-                    </small>
                   </td>
                   <td>{meal.mealType}</td>
                   <td>{meal.servingAmount}{meal.servingUnit}</td>
-                  <td><strong>{Math.round(meal.calories).toLocaleString()}</strong> kcal</td>
+                  <td>
+                    <MacroBar
+                      carbs={meal.carbs}
+                      protein={meal.protein}
+                      fat={meal.fat}
+                    />
+                  </td>
+                  <td>
+                    <div className="density-cell">
+                      <strong>{Math.round(meal.calories).toLocaleString()} kcal</strong>
+                      <span>
+                        100 kcal당 단백질{" "}
+                        {Math.round(
+                          (meal.protein / Math.max(meal.calories, 1)) * 100,
+                        )}
+                        g
+                      </span>
+                    </div>
+                  </td>
                   <td>
                     <span className={`source-badge ${sourceClass(meal.sourceType)}`}>
                       {meal.sourceLabel || SOURCE_LABELS[meal.sourceType]}
@@ -1609,6 +1935,102 @@ function FoodListPanel({
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function MacroBar({
+  carbs,
+  protein,
+  fat,
+}: {
+  carbs: number;
+  protein: number;
+  fat: number;
+}) {
+  const calories = carbs * 4 + protein * 4 + fat * 9;
+  const widths = {
+    carbs: (carbs * 4 * 100) / Math.max(calories, 1),
+    protein: (protein * 4 * 100) / Math.max(calories, 1),
+    fat: (fat * 9 * 100) / Math.max(calories, 1),
+  };
+  return (
+    <div className="macro-visual" aria-label={`탄수화물 ${carbs}g, 단백질 ${protein}g, 지방 ${fat}g`}>
+      <div className="macro-bar" aria-hidden="true">
+        <span className="macro-carbs" style={{ width: `${widths.carbs}%` }} />
+        <span className="macro-protein" style={{ width: `${widths.protein}%` }} />
+        <span className="macro-fat" style={{ width: `${widths.fat}%` }} />
+      </div>
+      <div className="macro-values">
+        <span className="carbs">탄 {Math.round(carbs)}g</span>
+        <span className="protein">단 {Math.round(protein)}g</span>
+        <span className="fat">지 {Math.round(fat)}g</span>
+      </div>
+    </div>
+  );
+}
+
+function SavedFoodPanel({
+  foods,
+  loading,
+  onAdd,
+  onAddToMeal,
+  onDelete,
+  onEdit,
+}: {
+  foods: SavedFood[];
+  loading: boolean;
+  onAdd: () => void;
+  onAddToMeal: (food: SavedFood) => void;
+  onDelete: (food: SavedFood) => void;
+  onEdit: (food: SavedFood) => void;
+}) {
+  return (
+    <section className="food-list-panel" aria-labelledby="saved-food-title">
+      <div className="food-list-heading">
+        <div>
+          <p className="eyebrow">나만의 영양 사전</p>
+          <h2 id="saved-food-title">내 음식 DB</h2>
+          <p>자주 먹는 음식 정보를 미리 저장하고 식사 기록에 바로 추가하세요.</p>
+        </div>
+        <button className="primary-button" type="button" onClick={onAdd}>
+          새 음식 등록
+        </button>
+      </div>
+      {loading ? (
+        <div className="food-list-loading">
+          <Skeleton count={4} height={150} />
+        </div>
+      ) : foods.length === 0 ? (
+        <div className="empty-state insights-empty">
+          <div>
+            <strong>미리 저장한 음식이 없어요.</strong>
+            자주 먹는 음식이나 레시피의 1회분 영양정보를 등록해보세요.
+          </div>
+        </div>
+      ) : (
+        <div className="saved-food-grid">
+          {foods.map((food) => (
+            <article className="saved-food-card" key={food.id}>
+              <div className="saved-food-card-head">
+                <div>
+                  <h3>{food.name}</h3>
+                  <p>{food.servingAmount}{food.servingUnit} 기준</p>
+                </div>
+                <strong>{Math.round(food.calories)}<small> kcal</small></strong>
+              </div>
+              <MacroBar carbs={food.carbs} protein={food.protein} fat={food.fat} />
+              <div className="saved-food-actions">
+                <button type="button" onClick={() => onAddToMeal(food)}>
+                  선택한 날짜에 기록
+                </button>
+                <button type="button" onClick={() => onEdit(food)}>수정</button>
+                <button type="button" onClick={() => onDelete(food)}>삭제</button>
+              </div>
+            </article>
+          ))}
         </div>
       )}
     </section>
