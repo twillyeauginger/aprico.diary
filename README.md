@@ -12,7 +12,7 @@
 - 음식·영양정보 사진 업로드
 - OpenAI 이미지 분석 결과 확인 후 저장
 - 데이터 출처를 검증 DB, 제품 표시값, AI 추정값으로 구분
-- 이메일 매직 링크 로그인과 기기 간 데이터 동기화
+- Google 로그인, 이메일 매직 링크와 기기 간 데이터 동기화
 - 홈 화면에 추가할 수 있는 PWA
 
 ## 로컬 실행
@@ -37,8 +37,13 @@ pnpm run preview:pages
 2. `analyze-photo`, `search-foods` Edge Function을 배포합니다.
 3. Supabase Auth의 Site URL을
    `https://twillyeauginger.github.io/aprico.diary/`로 설정합니다.
-4. 첫 사용자 계정을 만든 뒤 개인용 사용이라면 새 사용자 가입을 끕니다.
-5. GitHub 저장소의 Actions variables에 아래 두 값을 등록합니다.
+4. Google Cloud에서 웹 OAuth 클라이언트를 만들고 아래 주소를 등록합니다.
+   - JavaScript origin: `https://twillyeauginger.github.io`
+   - Redirect URI: `https://lexsvklkikuggtyrkzrk.supabase.co/auth/v1/callback`
+5. Google Client ID와 Client Secret을 Supabase Auth의 Google provider에
+   등록합니다.
+6. 첫 사용자 계정을 만든 뒤 개인용 사용이라면 새 사용자 가입을 끕니다.
+7. GitHub 저장소의 Actions variables에 아래 두 값을 등록합니다.
 
 - `VITE_SUPABASE_URL`: Supabase 프로젝트 URL
 - `VITE_SUPABASE_PUBLISHABLE_KEY`: 브라우저 공개용 publishable key

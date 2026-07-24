@@ -14,6 +14,7 @@ export function SupabaseApp() {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
+  const [googleSigningIn, setGoogleSigningIn] = useState(false);
 
   useEffect(() => {
     if (!supabase) return;
@@ -58,6 +59,21 @@ export function SupabaseApp() {
     );
   }
 
+  async function signInWithGoogle() {
+    if (!supabase) return;
+    setGoogleSigningIn(true);
+    setMessage("");
+    const redirectTo = new URL(import.meta.env.BASE_URL, window.location.origin);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: redirectTo.toString() },
+    });
+    if (error) {
+      setGoogleSigningIn(false);
+      setMessage(`Google 로그인을 시작하지 못했습니다: ${error.message}`);
+    }
+  }
+
   if (!isSupabaseConfigured) {
     return (
       <main className="auth-shell">
@@ -89,11 +105,40 @@ export function SupabaseApp() {
       <main className="auth-shell">
         <section className="auth-card">
           <p className="auth-kicker">개인 식단 기록</p>
-          <h1>이메일로 로그인하세요.</h1>
+          <h1>로그인하세요.</h1>
           <p>
-            같은 이메일로 로그인하면 아이폰, 윈도우와 맥에서 같은 기록을 볼 수
+            같은 Google 계정으로 로그인하면 아이폰, 윈도우와 맥에서 같은 기록을 볼 수
             있습니다.
           </p>
+          <button
+            className="google-auth-button"
+            type="button"
+            disabled={googleSigningIn}
+            onClick={signInWithGoogle}
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path
+                fill="#4285f4"
+                d="M21.6 12.2c0-.7-.1-1.5-.2-2.2H12v4.3h5.4a4.6 4.6 0 0 1-2 3v2.8h3.3c1.9-1.8 2.9-4.4 2.9-7.9Z"
+              />
+              <path
+                fill="#34a853"
+                d="M12 22c2.7 0 5-.9 6.7-2.4l-3.3-2.8c-.9.6-2.1 1-3.4 1a5.9 5.9 0 0 1-5.5-4.1H3.1v2.9A10 10 0 0 0 12 22Z"
+              />
+              <path
+                fill="#fbbc05"
+                d="M6.5 13.7a6 6 0 0 1 0-3.4v-3H3.1a10 10 0 0 0 0 9.3l3.4-2.9Z"
+              />
+              <path
+                fill="#ea4335"
+                d="M12 6.2c1.5 0 2.8.5 3.9 1.5l2.9-2.9A9.8 9.8 0 0 0 3.1 7.4l3.4 2.9A5.9 5.9 0 0 1 12 6.2Z"
+              />
+            </svg>
+            {googleSigningIn ? "Google로 이동하는 중…" : "Google로 계속"}
+          </button>
+          <div className="auth-divider" aria-hidden="true">
+            <span>또는</span>
+          </div>
           <form className="auth-form" onSubmit={sendMagicLink}>
             <label htmlFor="login-email">이메일</label>
             <input
