@@ -199,6 +199,10 @@ Deno.serve(async (request) => {
       photoId: photoPath,
     });
   } catch (error) {
+    console.error(
+      "analyze-photo failed:",
+      error instanceof Error ? error.message : error,
+    );
     return json(
       request,
       {

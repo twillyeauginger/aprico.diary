@@ -1,4 +1,8 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  createClient,
+  FunctionsHttpError,
+  type SupabaseClient,
+} from "@supabase/supabase-js";
 import type {
   AnalysisResult,
   FoodResult,
@@ -92,6 +96,21 @@ function extensionFor(file: File) {
   return "jpg";
 }
 
+async function functionErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof FunctionsHttpError) {
+    const body = (await error.context
+      .json()
+      .catch(() => null)) as { error?: unknown } | null;
+    if (typeof body?.error === "string" && body.error.trim()) {
+      return body.error;
+    }
+  }
+  if (error instanceof Error && error.message) {
+    return `${fallback}: ${error.message}`;
+  }
+  return fallback;
+}
+
 export function createSupabaseNutritionClient(
   client: SupabaseClient,
 ): NutritionClient {
@@ -105,6 +124,16 @@ export function createSupabaseNutritionClient(
         .order("meal_date", { ascending: true })
         .order("created_at", { ascending: true });
       if (error) throw new Error(`기록을 불러오지 못했습니다: ${error.message}`);
+      return ((data ?? []) as MealRow[]).map(rowToMeal);
+    },
+
+    async listAllMeals() {
+      const { data, error } = await client
+        .from("meals")
+        .select("*")
+        .order("meal_date", { ascending: false })
+        .order("created_at", { ascending: false });
+      if (error) throw new Error(`음식 목록을 불러오지 못했습니다: ${error.message}`);
       return ((data ?? []) as MealRow[]).map(rowToMeal);
     },
 
@@ -137,6 +166,34 @@ export function createSupabaseNutritionClient(
       return rowToMeal(data as MealRow);
     },
 
+    async updateMeal(id, payload) {
+      const { data, error } = await client
+        .from("meals")
+        .update({
+          meal_date: payload.mealDate,
+          meal_type: payload.mealType,
+          food_name: payload.foodName,
+          source_type: "manual",
+          source_label: "사용자 수정",
+          serving_amount: payload.servingAmount,
+          serving_unit: payload.servingUnit,
+          calories: payload.calories,
+          carbs: payload.carbs,
+          protein: payload.protein,
+          fat: payload.fat,
+          sugar: payload.sugar,
+          sodium: payload.sodium,
+          fiber: payload.fiber,
+          confidence: null,
+          photo_path: null,
+        })
+        .eq("id", id)
+        .select("*")
+        .single();
+      if (error) throw new Error(`기록을 수정하지 못했습니다: ${error.message}`);
+      return rowToMeal(data as MealRow);
+    },
+
     async deleteMeal(id) {
       const { error } = await client.from("meals").delete().eq("id", id);
       if (error) throw new Error(`기록을 삭제하지 못했습니다: ${error.message}`);
@@ -146,7 +203,9 @@ export function createSupabaseNutritionClient(
       const { data, error } = await client.functions.invoke("search-foods", {
         body: { query },
       });
-      if (error) throw new Error(`식품을 검색하지 못했습니다: ${error.message}`);
+      if (error) {
+        throw new Error(await functionErrorMessage(error, "식품을 검색하지 못했습니다."));
+      }
       const body = data as { foods?: FoodResult[]; error?: string };
       if (body.error) throw new Error(body.error);
       return body.foods ?? [];
@@ -178,7 +237,7 @@ export function createSupabaseNutritionClient(
       });
       if (error) {
         await client.storage.from("meal-photos").remove([photoPath]);
-        throw new Error(`사진을 분석하지 못했습니다: ${error.message}`);
+        throw new Error(await functionErrorMessage(error, "사진을 분석하지 못했습니다."));
       }
       const body = data as AnalysisResult & { error?: string };
       if (body.error) {

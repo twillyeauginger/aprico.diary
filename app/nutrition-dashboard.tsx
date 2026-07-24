@@ -79,7 +79,9 @@ export type MealInput = Omit<MealRecord, "id" | "demo">;
 
 export type NutritionClient = {
   listMeals(month: string): Promise<MealRecord[]>;
+  listAllMeals(): Promise<MealRecord[]>;
   createMeal(payload: MealInput): Promise<MealRecord>;
+  updateMeal(id: MealRecord["id"], payload: MealInput): Promise<MealRecord>;
   deleteMeal(id: MealRecord["id"]): Promise<void>;
   searchFoods(query: string): Promise<FoodResult[]>;
   analyzePhoto(file: File): Promise<AnalysisResult>;
@@ -89,6 +91,12 @@ const legacyNutritionClient: NutritionClient = {
   async listMeals(month) {
     const response = await fetch(`/api/meals?month=${month}`);
     if (!response.ok) throw new Error("기록을 불러오지 못했습니다.");
+    const body = (await response.json()) as { meals: MealRecord[] };
+    return body.meals;
+  },
+  async listAllMeals() {
+    const response = await fetch("/api/meals?all=true");
+    if (!response.ok) throw new Error("음식 목록을 불러오지 못했습니다.");
     const body = (await response.json()) as { meals: MealRecord[] };
     return body.meals;
   },
@@ -104,6 +112,21 @@ const legacyNutritionClient: NutritionClient = {
     };
     if (!response.ok || !body.meal) {
       throw new Error(body.error ?? "저장하지 못했습니다.");
+    }
+    return body.meal;
+  },
+  async updateMeal(id, payload) {
+    const response = await fetch(`/api/meals/${id}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = (await response.json().catch(() => ({}))) as {
+      meal?: MealRecord;
+      error?: string;
+    };
+    if (!response.ok || !body.meal) {
+      throw new Error(body.error ?? "수정하지 못했습니다.");
     }
     return body.meal;
   },
@@ -332,6 +355,9 @@ export function NutritionDashboard({
     new Date(today.getFullYear(), today.getMonth(), 1),
   );
   const [selectedDate, setSelectedDate] = useState(dateKey(today));
+  const [activeView, setActiveView] = useState<
+    "calendar" | "foods" | "insights"
+  >("calendar");
   const [meals, setMeals] = useState<MealRecord[]>([]);
   const [isDemo, setIsDemo] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -339,6 +365,12 @@ export function NutritionDashboard({
     "search",
   );
   const [manual, setManual] = useState(emptyManual(selectedDate));
+  const [editingMeal, setEditingMeal] = useState<MealRecord | null>(null);
+  const [editForm, setEditForm] = useState(emptyManual(selectedDate));
+  const [updating, setUpdating] = useState(false);
+  const [allMeals, setAllMeals] = useState<MealRecord[]>([]);
+  const [foodListLoading, setFoodListLoading] = useState(false);
+  const [foodListQuery, setFoodListQuery] = useState("");
   const [query, setQuery] = useState("");
   const [foodResults, setFoodResults] = useState<FoodResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -375,6 +407,31 @@ export function NutritionDashboard({
   }, [client, viewMonth, today]);
 
   useEffect(() => {
+    if (activeView !== "foods") return;
+    let cancelled = false;
+    client
+      .listAllMeals()
+      .then((rows) => {
+        if (!cancelled) setAllMeals(rows);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          showToast(
+            error instanceof Error
+              ? error.message
+              : "음식 목록을 불러오지 못했습니다.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setFoodListLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView, client]);
+
+  useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(""), 3200);
     return () => window.clearTimeout(timer);
@@ -408,6 +465,38 @@ export function NutritionDashboard({
     }
     return map;
   }, [meals]);
+
+  const monthInsights = useMemo(() => {
+    const actualMeals = meals.filter((meal) => !meal.demo);
+    const days = new Map<string, MealRecord[]>();
+    for (const meal of actualMeals) {
+      const rows = days.get(meal.mealDate) ?? [];
+      rows.push(meal);
+      days.set(meal.mealDate, rows);
+    }
+    const dailyTotals = [...days.entries()]
+      .map(([date, rows]) => ({ date, ...sumNutrition(rows) }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    const totals = sumNutrition(actualMeals);
+    const dayCount = days.size;
+    const mealTypes = ["아침", "점심", "저녁", "간식"].map((type) => ({
+      type,
+      count: actualMeals.filter((meal) => meal.mealType === type).length,
+    }));
+    return { dayCount, dailyTotals, totals, mealTypes };
+  }, [meals]);
+
+  const filteredAllMeals = useMemo(() => {
+    const normalized = foodListQuery.trim().toLocaleLowerCase("ko");
+    return [...allMeals]
+      .filter(
+        (meal) =>
+          !normalized ||
+          meal.foodName.toLocaleLowerCase("ko").includes(normalized) ||
+          meal.mealType.toLocaleLowerCase("ko").includes(normalized),
+      )
+      .sort((a, b) => b.mealDate.localeCompare(a.mealDate));
+  }, [allMeals, foodListQuery]);
 
   function showToast(message: string) {
     setToast(message);
@@ -463,6 +552,62 @@ export function NutritionDashboard({
       closeModal();
     } catch (error) {
       showToast(error instanceof Error ? error.message : "저장하지 못했습니다.");
+    }
+  }
+
+  function openEdit(meal: MealRecord) {
+    setEditingMeal(meal);
+    setEditForm({
+      mealDate: meal.mealDate,
+      mealType: meal.mealType,
+      foodName: meal.foodName,
+      servingAmount: String(meal.servingAmount),
+      servingUnit: meal.servingUnit,
+      calories: String(meal.calories),
+      carbs: String(meal.carbs),
+      protein: String(meal.protein),
+      fat: String(meal.fat),
+      sugar: String(meal.sugar),
+      sodium: String(meal.sodium),
+      fiber: String(meal.fiber),
+    });
+  }
+
+  async function handleEditSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingMeal || !editForm.foodName.trim()) return;
+    setUpdating(true);
+    try {
+      const updated = await client.updateMeal(editingMeal.id, {
+        mealDate: editForm.mealDate,
+        mealType: editForm.mealType,
+        foodName: editForm.foodName.trim(),
+        sourceType: "manual",
+        sourceLabel: "사용자 수정",
+        servingAmount: Number(editForm.servingAmount) || 1,
+        servingUnit: editForm.servingUnit || "인분",
+        calories: Number(editForm.calories) || 0,
+        carbs: Number(editForm.carbs) || 0,
+        protein: Number(editForm.protein) || 0,
+        fat: Number(editForm.fat) || 0,
+        sugar: Number(editForm.sugar) || 0,
+        sodium: Number(editForm.sodium) || 0,
+        fiber: Number(editForm.fiber) || 0,
+      });
+      setMeals((current) =>
+        current.map((meal) => (meal.id === updated.id ? updated : meal)),
+      );
+      setAllMeals((current) =>
+        current.map((meal) => (meal.id === updated.id ? updated : meal)),
+      );
+      setSelectedDate(updated.mealDate);
+      setViewMonth(new Date(`${updated.mealDate.slice(0, 7)}-01T12:00:00`));
+      setEditingMeal(null);
+      showToast("기록을 수정했어요.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "수정하지 못했습니다.");
+    } finally {
+      setUpdating(false);
     }
   }
 
@@ -591,13 +736,40 @@ export function NutritionDashboard({
           식단 기록
         </div>
         <nav className="top-nav" aria-label="주요 메뉴">
-          <button className="active" type="button">
+          <button
+            className={activeView === "calendar" ? "active" : ""}
+            type="button"
+            onClick={() => setActiveView("calendar")}
+          >
             캘린더
           </button>
-          <button type="button" onClick={() => openAdd()}>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveView("calendar");
+              setViewMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+              setSelectedDate(dateKey(today));
+              openAdd();
+              setManual(emptyManual(dateKey(today)));
+            }}
+          >
             오늘 기록
           </button>
-          <button type="button" onClick={() => showToast("인사이트는 다음 단계에서 열려요.")}>
+          <button
+            className={activeView === "foods" ? "active" : ""}
+            type="button"
+            onClick={() => {
+              setFoodListLoading(true);
+              setActiveView("foods");
+            }}
+          >
+            음식 목록
+          </button>
+          <button
+            className={activeView === "insights" ? "active" : ""}
+            type="button"
+            onClick={() => setActiveView("insights")}
+          >
             인사이트
           </button>
         </nav>
@@ -661,34 +833,54 @@ export function NutritionDashboard({
         </div>
       )}
 
-      <section className="summary-grid" aria-label="선택한 날짜 영양 요약">
+      {activeView !== "foods" && <section
+        className="summary-grid"
+        aria-label={activeView === "calendar" ? "선택한 날짜 영양 요약" : "월간 영양 요약"}
+      >
         <SummaryCard
-          label="오늘의 에너지"
-          value={Math.round(selectedTotals.calories)}
+          label={activeView === "calendar" ? "오늘의 에너지" : "하루 평균 에너지"}
+          value={Math.round(
+            activeView === "calendar"
+              ? selectedTotals.calories
+              : monthInsights.totals.calories / Math.max(monthInsights.dayCount, 1),
+          )}
           unit="kcal"
           goal={2000}
           primary
         />
         <SummaryCard
           label="탄수화물"
-          value={Math.round(selectedTotals.carbs)}
+          value={Math.round(
+            activeView === "calendar"
+              ? selectedTotals.carbs
+              : monthInsights.totals.carbs / Math.max(monthInsights.dayCount, 1),
+          )}
           unit="g"
           goal={250}
         />
         <SummaryCard
           label="단백질"
-          value={Math.round(selectedTotals.protein)}
+          value={Math.round(
+            activeView === "calendar"
+              ? selectedTotals.protein
+              : monthInsights.totals.protein / Math.max(monthInsights.dayCount, 1),
+          )}
           unit="g"
           goal={100}
         />
         <SummaryCard
           label="지방"
-          value={Math.round(selectedTotals.fat)}
+          value={Math.round(
+            activeView === "calendar"
+              ? selectedTotals.fat
+              : monthInsights.totals.fat / Math.max(monthInsights.dayCount, 1),
+          )}
           unit="g"
           goal={65}
         />
-      </section>
+      </section>}
 
+      {activeView === "calendar" ? (
       <section className="dashboard-grid">
         <div className="panel calendar-panel">
           <div className="panel-header">
@@ -825,7 +1017,7 @@ export function NutritionDashboard({
                       <span
                         className={`source-badge ${sourceClass(meal.sourceType)}`}
                       >
-                        {SOURCE_LABELS[meal.sourceType]}
+                        {meal.sourceLabel || SOURCE_LABELS[meal.sourceType]}
                       </span>
                     </div>
                   </div>
@@ -833,14 +1025,26 @@ export function NutritionDashboard({
                     <strong>{Math.round(meal.calories)}</strong>
                     <span>kcal</span>
                   </div>
-                  <button
-                    className="delete-meal"
-                    type="button"
-                    aria-label={`${meal.foodName} 삭제`}
-                    onClick={() => deleteMeal(meal)}
-                  >
-                    ×
-                  </button>
+                  <div className="meal-actions">
+                    {!meal.demo && (
+                      <button
+                        className="edit-meal"
+                        type="button"
+                        aria-label={`${meal.foodName} 수정`}
+                        onClick={() => openEdit(meal)}
+                      >
+                        수정
+                      </button>
+                    )}
+                    <button
+                      className="delete-meal"
+                      type="button"
+                      aria-label={`${meal.foodName} 삭제`}
+                      onClick={() => deleteMeal(meal)}
+                    >
+                      ×
+                    </button>
+                  </div>
                 </article>
               ))}
             </div>
@@ -858,6 +1062,21 @@ export function NutritionDashboard({
           </button>
         </aside>
       </section>
+      ) : activeView === "insights" ? (
+        <InsightsPanel
+          month={viewMonth}
+          insights={monthInsights}
+          onChangeMonth={changeMonth}
+        />
+      ) : (
+        <FoodListPanel
+          loading={foodListLoading}
+          meals={filteredAllMeals}
+          query={foodListQuery}
+          onQueryChange={setFoodListQuery}
+          onEdit={openEdit}
+        />
+      )}
 
       <button
         className="floating-add"
@@ -1164,12 +1383,358 @@ export function NutritionDashboard({
           </section>
         </div>
       )}
+      {editingMeal && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) setEditingMeal(null);
+          }}
+        >
+          <section
+            aria-labelledby="edit-food-title"
+            aria-modal="true"
+            className="modal"
+            role="dialog"
+          >
+            <div className="modal-header">
+              <div>
+                <h2 id="edit-food-title">직접 입력 기록 수정</h2>
+                <p>저장하면 기기 간 기록에도 바로 반영됩니다.</p>
+              </div>
+              <button
+                className="close-button"
+                type="button"
+                aria-label="닫기"
+                onClick={() => setEditingMeal(null)}
+              >
+                ×
+              </button>
+            </div>
+            <form className="tab-content" onSubmit={handleEditSubmit}>
+              <div className="field-row">
+                <div className="field">
+                  <label htmlFor="edit-meal-date">날짜</label>
+                  <input
+                    id="edit-meal-date"
+                    type="date"
+                    value={editForm.mealDate}
+                    onChange={(event) =>
+                      setEditForm({ ...editForm, mealDate: event.target.value })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="edit-meal-type">식사 구분</label>
+                  <select
+                    id="edit-meal-type"
+                    value={editForm.mealType}
+                    onChange={(event) =>
+                      setEditForm({ ...editForm, mealType: event.target.value })
+                    }
+                  >
+                    {["아침", "점심", "저녁", "간식"].map((type) => (
+                      <option key={type}>{type}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="field">
+                <label htmlFor="edit-food-name">음식 이름</label>
+                <input
+                  id="edit-food-name"
+                  required
+                  value={editForm.foodName}
+                  onChange={(event) =>
+                    setEditForm({ ...editForm, foodName: event.target.value })
+                  }
+                />
+              </div>
+              <div className="field-row">
+                <div className="field">
+                  <label htmlFor="edit-serving-amount">섭취량</label>
+                  <input
+                    id="edit-serving-amount"
+                    inputMode="decimal"
+                    value={editForm.servingAmount}
+                    onChange={(event) =>
+                      setEditForm({ ...editForm, servingAmount: event.target.value })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="edit-serving-unit">단위</label>
+                  <input
+                    id="edit-serving-unit"
+                    value={editForm.servingUnit}
+                    onChange={(event) =>
+                      setEditForm({ ...editForm, servingUnit: event.target.value })
+                    }
+                  />
+                </div>
+              </div>
+              <div className="field-row">
+                {[
+                  ["calories", "열량 (kcal)"],
+                  ["carbs", "탄수화물 (g)"],
+                  ["protein", "단백질 (g)"],
+                  ["fat", "지방 (g)"],
+                  ["sugar", "당류 (g)"],
+                  ["sodium", "나트륨 (mg)"],
+                  ["fiber", "식이섬유 (g)"],
+                ].map(([key, label]) => (
+                  <NutrientField
+                    id={`edit-${key}`}
+                    key={key}
+                    label={label}
+                    value={editForm[key as keyof typeof editForm]}
+                    onChange={(value) =>
+                      setEditForm({ ...editForm, [key]: value })
+                    }
+                  />
+                ))}
+              </div>
+              <button
+                className="primary-button wide-button"
+                type="submit"
+                disabled={updating}
+              >
+                {updating ? "저장하는 중…" : "수정 내용 저장"}
+              </button>
+            </form>
+          </section>
+        </div>
+      )}
       {toast && (
         <div className="toast" role="status">
           {toast}
         </div>
       )}
     </main>
+  );
+}
+
+function FoodListPanel({
+  loading,
+  meals,
+  query,
+  onQueryChange,
+  onEdit,
+}: {
+  loading: boolean;
+  meals: MealRecord[];
+  query: string;
+  onQueryChange: (query: string) => void;
+  onEdit: (meal: MealRecord) => void;
+}) {
+  return (
+    <section className="food-list-panel" aria-labelledby="food-list-title">
+      <div className="food-list-heading">
+        <div>
+          <p className="eyebrow">내 식사 기록</p>
+          <h2 id="food-list-title">먹은 음식 목록</h2>
+          <p>날짜와 관계없이 모든 기록을 모아보고 수정할 수 있습니다.</p>
+        </div>
+        <label className="food-list-search">
+          <span className="sr-only">음식 검색</span>
+          <input
+            type="search"
+            placeholder="음식 이름 또는 식사 구분 검색"
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+          />
+        </label>
+      </div>
+      {loading ? (
+        <div className="food-list-loading" aria-live="polite">
+          <Skeleton
+            count={5}
+            height={70}
+            baseColor="#efeadf"
+            highlightColor="#fffdf8"
+          />
+        </div>
+      ) : meals.length === 0 ? (
+        <div className="empty-state insights-empty">
+          <div>
+            <strong>{query ? "검색 결과가 없어요." : "아직 기록한 음식이 없어요."}</strong>
+            {query
+              ? "다른 음식 이름이나 식사 구분으로 찾아보세요."
+              : "캘린더에서 첫 음식을 추가해보세요."}
+          </div>
+        </div>
+      ) : (
+        <div className="food-table-wrap">
+          <table className="food-table">
+            <thead>
+              <tr>
+                <th>날짜</th>
+                <th>음식</th>
+                <th>식사</th>
+                <th>섭취량</th>
+                <th>열량</th>
+                <th>출처</th>
+                <th><span className="sr-only">작업</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {meals.map((meal) => (
+                <tr key={meal.id}>
+                  <td>{meal.mealDate}</td>
+                  <td>
+                    <strong>{meal.foodName}</strong>
+                    <small>
+                      탄 {Math.round(meal.carbs)} · 단 {Math.round(meal.protein)} · 지{" "}
+                      {Math.round(meal.fat)}g
+                    </small>
+                  </td>
+                  <td>{meal.mealType}</td>
+                  <td>{meal.servingAmount}{meal.servingUnit}</td>
+                  <td><strong>{Math.round(meal.calories).toLocaleString()}</strong> kcal</td>
+                  <td>
+                    <span className={`source-badge ${sourceClass(meal.sourceType)}`}>
+                      {meal.sourceLabel || SOURCE_LABELS[meal.sourceType]}
+                    </span>
+                  </td>
+                  <td>
+                    <button
+                      className="table-edit-button"
+                      type="button"
+                      onClick={() => onEdit(meal)}
+                    >
+                      수정
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function InsightsPanel({
+  month,
+  insights,
+  onChangeMonth,
+}: {
+  month: Date;
+  insights: {
+    dayCount: number;
+    dailyTotals: Array<ReturnType<typeof sumNutrition> & { date: string }>;
+    totals: ReturnType<typeof sumNutrition>;
+    mealTypes: Array<{ type: string; count: number }>;
+  };
+  onChangeMonth: (offset: number) => void;
+}) {
+  const averageCalories =
+    insights.totals.calories / Math.max(insights.dayCount, 1);
+  const maxCalories = Math.max(
+    2000,
+    ...insights.dailyTotals.map((day) => day.calories),
+  );
+  const totalMeals = insights.mealTypes.reduce(
+    (total, item) => total + item.count,
+    0,
+  );
+
+  return (
+    <section className="insights-panel" aria-labelledby="insights-title">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">월간 인사이트</p>
+          <h2 id="insights-title">
+            {month.getFullYear()}년 {month.getMonth() + 1}월 기록
+          </h2>
+          <p className="date-kicker">
+            기록한 날짜를 기준으로 하루 평균을 계산합니다.
+          </p>
+        </div>
+        <div className="month-controls">
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="이전 달"
+            onClick={() => onChangeMonth(-1)}
+          >
+            ←
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="다음 달"
+            onClick={() => onChangeMonth(1)}
+          >
+            →
+          </button>
+        </div>
+      </div>
+
+      {insights.dayCount === 0 ? (
+        <div className="empty-state insights-empty">
+          <div>
+            <strong>아직 분석할 기록이 없어요.</strong>
+            며칠간 식단을 기록하면 섭취 흐름과 식사 패턴을 확인할 수 있어요.
+          </div>
+        </div>
+      ) : (
+        <div className="insights-grid">
+          <article className="insight-card">
+            <span className="insight-label">기록한 날</span>
+            <strong>{insights.dayCount}<small>일</small></strong>
+            <p>총 {totalMeals}개의 음식 기록</p>
+          </article>
+          <article className="insight-card">
+            <span className="insight-label">하루 평균 열량</span>
+            <strong>{Math.round(averageCalories).toLocaleString()}<small>kcal</small></strong>
+            <p>기록이 있는 날짜 기준</p>
+          </article>
+          <article className="insight-card trend-card">
+            <div>
+              <span className="insight-label">일별 섭취 열량</span>
+              <p>막대에 날짜별 총 섭취량을 표시합니다.</p>
+            </div>
+            <div className="trend-bars" aria-label="날짜별 섭취 열량">
+              {insights.dailyTotals.map((day) => (
+                <div className="trend-day" key={day.date}>
+                  <span
+                    className="trend-bar"
+                    style={{
+                      height: `${Math.max(5, (day.calories / maxCalories) * 100)}%`,
+                    }}
+                    title={`${day.date}: ${Math.round(day.calories)} kcal`}
+                  />
+                  <small>{Number(day.date.slice(-2))}</small>
+                </div>
+              ))}
+            </div>
+          </article>
+          <article className="insight-card meal-pattern-card">
+            <span className="insight-label">식사별 기록 비중</span>
+            <div className="meal-patterns">
+              {insights.mealTypes.map((item) => {
+                const percent = Math.round(
+                  (item.count / Math.max(totalMeals, 1)) * 100,
+                );
+                return (
+                  <div className="meal-pattern" key={item.type}>
+                    <div>
+                      <span>{item.type}</span>
+                      <strong>{item.count}회 · {percent}%</strong>
+                    </div>
+                    <div className="progress-track" aria-hidden="true">
+                      <div className="progress-fill" style={{ width: `${percent}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </article>
+        </div>
+      )}
+    </section>
   );
 }
 

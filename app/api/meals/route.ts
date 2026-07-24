@@ -1,4 +1,4 @@
-import { and, asc, gte, lt } from "drizzle-orm";
+import { and, asc, desc, gte, lt } from "drizzle-orm";
 import { ensureSchema, getDb } from "../../../db";
 import { mealEntries } from "../../../db/schema";
 
@@ -32,6 +32,13 @@ export async function GET(request: Request) {
   try {
     await ensureSchema();
     const url = new URL(request.url);
+    if (url.searchParams.get("all") === "true") {
+      const meals = await getDb()
+        .select()
+        .from(mealEntries)
+        .orderBy(desc(mealEntries.mealDate), desc(mealEntries.createdAt));
+      return Response.json({ meals });
+    }
     const { start, end } = monthBounds(
       url.searchParams.get("month") ?? new Date().toISOString().slice(0, 7),
     );
