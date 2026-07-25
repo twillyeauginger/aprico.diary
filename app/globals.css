@@ -1145,6 +1145,52 @@ button {
   font-weight: 800;
 }
 
+.day-type-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border-radius: 999px;
+  padding: 3px 6px;
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.day-type-badge.exercise {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.day-type-badge.rest {
+  background: #fef3c7;
+  color: #8a6500;
+}
+
+.day-type-selector {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 14px;
+  border-radius: 14px;
+  background: var(--paper-deep);
+  padding: 5px;
+}
+
+.day-type-selector button {
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 9px 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.day-type-selector button.active {
+  background: var(--white);
+  color: var(--ink);
+  box-shadow: 0 3px 8px rgba(48, 57, 51, 0.08);
+}
+
 .day-cell.today .day-number {
   background: var(--ink);
   color: white;

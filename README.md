@@ -55,6 +55,8 @@ Edge Function 비밀값은 Supabase에만 설정합니다.
 - `FOOD_DB_API_KEY`: 식약처 식품영양성분 DB 검색
 - `APP_ORIGIN`: 기본 허용 주소, `https://twillyeauginger.github.io`
 - `APP_ORIGINS`: 추가 허용 주소를 쉼표로 구분
+- `CHATGPT_API_TOKEN`: Custom GPT Action 전용 Bearer 토큰
+- `CHATGPT_USER_ID`: Action이 기록할 Supabase Auth 사용자 UUID
 
 `OPENAI_API_KEY`와 `FOOD_DB_API_KEY`는 GitHub 변수나 프런트엔드 코드에
 넣지 않습니다.
@@ -73,3 +75,42 @@ Edge Function 비밀값은 Supabase에만 설정합니다.
 - `FOOD_DB_API_KEY`: 식약처 식품영양성분 DB 검색
 
 API 키는 저장소에 커밋하지 않습니다.
+
+## ChatGPT Custom GPT Action
+
+외부 API는 Supabase Edge Function `chatgpt-api`로 제공되며 모든 요청에
+전용 Bearer 토큰이 필요합니다. `CHATGPT_API_TOKEN`은 충분히 긴 무작위
+문자열로 만들고 `CHATGPT_USER_ID`에는 기록을 소유할 사용자 UUID를 넣습니다.
+
+```bash
+supabase secrets set CHATGPT_API_TOKEN=... CHATGPT_USER_ID=...
+supabase functions deploy chatgpt-api --no-verify-jwt
+```
+
+`openapi.yaml`을 GPT 편집 화면의 **Actions → Import from URL/File**에서
+불러온 뒤 인증 방식을 **API Key → Bearer**로 선택하고 같은 토큰을 입력합니다.
+스키마에는 식품·식사 등록과 삭제 전에 반드시 사용자 확인을 받도록 명시되어
+있습니다.
+
+공개 HTTPS 기본 주소:
+
+`https://lexsvklkikuggtyrkzrk.supabase.co/functions/v1/chatgpt-api/api/chatgpt`
+
+테스트용 식품 예시:
+
+```json
+{
+  "name": "구운계란",
+  "servingAmount": 1,
+  "servingUnit": "개",
+  "weightGrams": 50,
+  "caloriesKcal": 73,
+  "carbohydratesGrams": 0.7,
+  "proteinGrams": 6.7,
+  "fatGrams": 4.3,
+  "sodiumMilligrams": 64,
+  "sugarsGrams": null,
+  "source": "사용자 제공",
+  "notes": null
+}
+```

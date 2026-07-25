@@ -101,6 +101,7 @@ export type SavedFood = {
 };
 
 export type SavedFoodInput = Omit<SavedFood, "id">;
+export type DayType = "default" | "exercise" | "rest";
 
 export type NutritionGoals = {
   goalType: string;
@@ -157,6 +158,8 @@ export type NutritionClient = {
   deleteSavedFood(id: SavedFood["id"]): Promise<void>;
   getNutritionGoals(): Promise<NutritionGoals>;
   updateNutritionGoals(goals: NutritionGoals): Promise<NutritionGoals>;
+  listDayTypes(month: string): Promise<Record<string, DayType>>;
+  setDayType(date: string, dayType: DayType): Promise<void>;
   searchFoods(query: string): Promise<FoodResult[]>;
   analyzePhoto(file: File): Promise<AnalysisResult>;
 };
@@ -253,6 +256,19 @@ const legacyNutritionClient: NutritionClient = {
     const body = (await response.json()) as { goals?: NutritionGoals; error?: string };
     if (!response.ok || !body.goals) throw new Error(body.error ?? "목표를 저장하지 못했습니다.");
     return body.goals;
+  },
+  async listDayTypes(month) {
+    const response = await fetch(`/api/day-types?month=${month}`);
+    if (!response.ok) return {};
+    return ((await response.json()) as { dayTypes: Record<string, DayType> }).dayTypes;
+  },
+  async setDayType(date, dayType) {
+    const response = await fetch("/api/day-types", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ date, dayType }),
+    });
+    if (!response.ok) throw new Error("날짜 유형을 저장하지 못했습니다.");
   },
   async searchFoods(query) {
     const response = await fetch(`/api/foods?q=${encodeURIComponent(query)}`);
@@ -486,6 +502,28 @@ function formatMinutes(minutes: number) {
   ).padStart(2, "0")}`;
 }
 
+function goalsForDay(goals: NutritionGoals, dayType: DayType) {
+  if (dayType === "exercise") {
+    return {
+      ...goals,
+      calories: Math.round((goals.exerciseCaloriesMin + goals.exerciseCaloriesMax) / 2),
+      carbs: Math.round((goals.exerciseCarbsMin + goals.exerciseCarbsMax) / 2),
+      protein: Math.round((goals.exerciseProteinMin + goals.exerciseProteinMax) / 2),
+      fat: goals.exerciseFat,
+    };
+  }
+  if (dayType === "rest") {
+    return {
+      ...goals,
+      calories: goals.restCalories,
+      carbs: Math.round((goals.restCarbsMin + goals.restCarbsMax) / 2),
+      protein: goals.restProtein,
+      fat: goals.restFat,
+    };
+  }
+  return goals;
+}
+
 export function NutritionDashboard({
   client = legacyNutritionClient,
   userEmail,
@@ -505,6 +543,7 @@ export function NutritionDashboard({
   >("calendar");
   const [nutritionGoals, setNutritionGoals] =
     useState<NutritionGoals>(DEFAULT_GOALS);
+  const [dayTypes, setDayTypes] = useState<Record<string, DayType>>({});
   const [meals, setMeals] = useState<MealRecord[]>([]);
   const [isDemo, setIsDemo] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -565,6 +604,16 @@ export function NutritionDashboard({
       cancelled = true;
     };
   }, [client]);
+
+  useEffect(() => {
+    let cancelled = false;
+    client.listDayTypes(monthKey(viewMonth)).then((types) => {
+      if (!cancelled) setDayTypes((current) => ({ ...current, ...types }));
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [client, viewMonth]);
 
   useEffect(() => {
     let cancelled = false;
@@ -668,6 +717,10 @@ export function NutritionDashboard({
   const selectedTotals = useMemo(
     () => sumNutrition(selectedMeals),
     [selectedMeals],
+  );
+  const selectedGoals = goalsForDay(
+    nutritionGoals,
+    dayTypes[selectedDate] ?? "default",
   );
 
   const dailyMap = useMemo(() => {
@@ -1333,7 +1386,7 @@ export function NutritionDashboard({
               : monthInsights.totals.calories / Math.max(monthInsights.dayCount, 1),
           )}
           unit="kcal"
-          goal={nutritionGoals.calories}
+          goal={activeView === "calendar" ? selectedGoals.calories : nutritionGoals.calories}
           primary
         />
         <SummaryCard
@@ -1344,7 +1397,7 @@ export function NutritionDashboard({
               : monthInsights.totals.carbs / Math.max(monthInsights.dayCount, 1),
           )}
           unit="g"
-          goal={nutritionGoals.carbs}
+          goal={activeView === "calendar" ? selectedGoals.carbs : nutritionGoals.carbs}
         />
         <SummaryCard
           label="단백질"
@@ -1354,7 +1407,7 @@ export function NutritionDashboard({
               : monthInsights.totals.protein / Math.max(monthInsights.dayCount, 1),
           )}
           unit="g"
-          goal={nutritionGoals.protein}
+          goal={activeView === "calendar" ? selectedGoals.protein : nutritionGoals.protein}
         />
         <SummaryCard
           label="지방"
@@ -1364,7 +1417,7 @@ export function NutritionDashboard({
               : monthInsights.totals.fat / Math.max(monthInsights.dayCount, 1),
           )}
           unit="g"
-          goal={nutritionGoals.fat}
+          goal={activeView === "calendar" ? selectedGoals.fat : nutritionGoals.fat}
         />
       </section>}
 
@@ -1443,6 +1496,11 @@ export function NutritionDashboard({
                   }}
                 >
                   <span className="day-number">{date.getDate()}</span>
+                  {dayTypes[key] && dayTypes[key] !== "default" && (
+                    <span className={`day-type-badge ${dayTypes[key]}`}>
+                      {dayTypes[key] === "exercise" ? "운동" : "휴식"}
+                    </span>
+                  )}
                   {dayMeals.length > 0 && (
                     <>
                       <span className="day-kcal">
@@ -1461,6 +1519,30 @@ export function NutritionDashboard({
                 </button>
               );
             })}
+          </div>
+          <div className="day-type-selector" aria-label="선택한 날짜 유형">
+            {([
+              ["default", "기본일"],
+              ["exercise", "운동일"],
+              ["rest", "휴식일"],
+            ] as Array<[DayType, string]>).map(([value, label]) => (
+              <button
+                className={(dayTypes[selectedDate] ?? "default") === value ? "active" : ""}
+                key={value}
+                type="button"
+                onClick={async () => {
+                  try {
+                    await client.setDayType(selectedDate, value);
+                    setDayTypes((current) => ({ ...current, [selectedDate]: value }));
+                    showToast(`${label}로 설정했어요.`);
+                  } catch (error) {
+                    showToast(error instanceof Error ? error.message : "저장하지 못했습니다.");
+                  }
+                }}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
 

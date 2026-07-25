@@ -36,6 +36,13 @@
       "when": 1784953840115,
       "tag": "0004_unknown_white_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1784955350422,
+      "tag": "0005_silly_luke_cage",
+      "breakpoints": true
     }
   ]
 }

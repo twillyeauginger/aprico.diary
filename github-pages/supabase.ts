@@ -5,6 +5,7 @@ import {
 } from "@supabase/supabase-js";
 import type {
   AnalysisResult,
+  DayType,
   FoodResult,
   MealInput,
   MealRecord,
@@ -328,6 +329,27 @@ export function createSupabaseNutritionClient(
         .upsert(values, { onConflict: "user_id" });
       if (error) throw new Error(`영양 목표를 저장하지 못했습니다: ${error.message}`);
       return goals;
+    },
+
+    async listDayTypes(month) {
+      const { data, error } = await client
+        .from("calendar_day_types")
+        .select("day_date, day_type")
+        .gte("day_date", `${month}-01`)
+        .lt("day_date", nextMonth(month));
+      if (error) throw new Error(`날짜 유형을 불러오지 못했습니다: ${error.message}`);
+      return Object.fromEntries(
+        (data ?? []).map((row) => [row.day_date, row.day_type as DayType]),
+      );
+    },
+
+    async setDayType(date, dayType) {
+      const user = await requireUser(client);
+      const { error } = await client.from("calendar_day_types").upsert(
+        { user_id: user.id, day_date: date, day_type: dayType },
+        { onConflict: "user_id,day_date" },
+      );
+      if (error) throw new Error(`날짜 유형을 저장하지 못했습니다: ${error.message}`);
     },
 
     async searchFoods(query) {

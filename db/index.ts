@@ -104,6 +104,12 @@ export function ensureSchema() {
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
       `),
+      database.prepare(`
+        CREATE TABLE IF NOT EXISTS calendar_day_types (
+          day_date TEXT PRIMARY KEY,
+          day_type TEXT NOT NULL DEFAULT 'default'
+        )
+      `),
     ])
     .then(() => undefined)
     .catch((error) => {

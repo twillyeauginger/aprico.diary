@@ -74,3 +74,8 @@ export const nutritionGoals = sqliteTable("nutrition_goals", {
   goalsJson: text("goals_json").notNull(),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const calendarDayTypes = sqliteTable("calendar_day_types", {
+  dayDate: text("day_date").primaryKey(),
+  dayType: text("day_type").notNull().default("default"),
+});
