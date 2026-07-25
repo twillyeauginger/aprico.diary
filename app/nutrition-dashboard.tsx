@@ -77,6 +77,12 @@ export type AnalysisResult = {
   photoId: string;
 };
 
+type AnalysisDraft = {
+  name: string;
+  amountMode: "percent" | "grams";
+  amount: string;
+};
+
 export type MealInput = Omit<MealRecord, "id" | "demo">;
 
 export type SavedFood = {
@@ -474,6 +480,7 @@ export function NutritionDashboard({
   );
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [analysisDrafts, setAnalysisDrafts] = useState<AnalysisDraft[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<
     | { kind: "meal"; item: MealRecord }
     | { kind: "savedFood"; item: SavedFood }
@@ -682,6 +689,7 @@ export function NutritionDashboard({
   function closeModal() {
     setModalOpen(false);
     setAnalysis(null);
+    setAnalysisDrafts([]);
     setPhotoFile(null);
     if (photoPreview) URL.revokeObjectURL(photoPreview);
     setPhotoPreview("");
@@ -923,6 +931,7 @@ export function NutritionDashboard({
     setPhotoFile(file);
     setPhotoPreview(URL.createObjectURL(file));
     setAnalysis(null);
+    setAnalysisDrafts([]);
     setPhotoDate(selectedDate);
     setPhotoTime("");
     setPhotoDateSource("selected");
@@ -949,8 +958,17 @@ export function NutritionDashboard({
     if (!photoFile) return;
     setAnalyzing(true);
     setAnalysis(null);
+    setAnalysisDrafts([]);
     try {
-      setAnalysis(await client.analyzePhoto(photoFile));
+      const result = await client.analyzePhoto(photoFile);
+      setAnalysis(result);
+      setAnalysisDrafts(
+        result.items.map((item) => ({
+          name: item.name,
+          amountMode: item.portionGrams ? "grams" : "percent",
+          amount: item.portionGrams ? String(item.portionGrams) : "100",
+        })),
+      );
     } catch (error) {
       showToast(
         error instanceof Error
@@ -965,27 +983,44 @@ export function NutritionDashboard({
   async function confirmAnalysis() {
     if (!analysis) return;
     try {
-      for (const item of analysis.items) {
+      for (const [index, item] of analysis.items.entries()) {
+        const draft = analysisDrafts[index] ?? {
+          name: item.name,
+          amountMode: "percent" as const,
+          amount: "100",
+        };
+        const enteredAmount = Math.max(0, Number(draft.amount) || 0);
+        if (enteredAmount === 0) continue;
+        const ratio =
+          draft.amountMode === "grams" && item.portionGrams
+            ? enteredAmount / item.portionGrams
+            : enteredAmount / 100;
+        const servingAmount =
+          draft.amountMode === "grams"
+            ? enteredAmount
+            : item.portionGrams
+              ? item.portionGrams * ratio
+              : ratio;
         await saveMeal(
           {
             mealDate: photoDate,
             mealTime: photoTime,
             mealType: "점심",
-            foodName: item.name,
+            foodName: draft.name.trim() || item.name,
             sourceType: item.sourceType,
             sourceLabel:
               item.sourceType === "label"
                 ? "영양정보 사진 표시값"
                 : "GPT 사진 추정",
-            servingAmount: item.portionGrams ?? 1,
-            servingUnit: item.portionGrams ? "g" : item.portionText || "인분",
-            calories: item.nutrition.calories,
-            carbs: item.nutrition.carbs,
-            protein: item.nutrition.protein,
-            fat: item.nutrition.fat,
-            sugar: item.nutrition.sugar,
-            sodium: item.nutrition.sodium,
-            fiber: item.nutrition.fiber,
+            servingAmount,
+            servingUnit: item.portionGrams ? "g" : "인분",
+            calories: item.nutrition.calories * ratio,
+            carbs: item.nutrition.carbs * ratio,
+            protein: item.nutrition.protein * ratio,
+            fat: item.nutrition.fat * ratio,
+            sugar: item.nutrition.sugar * ratio,
+            sodium: item.nutrition.sodium * ratio,
+            fiber: item.nutrition.fiber * ratio,
             confidence: item.confidence,
             photoId: analysis.photoId,
           },
@@ -1376,6 +1411,7 @@ export function NutritionDashboard({
         <FoodListPanel
           loading={foodListLoading}
           meals={filteredAllMeals}
+          dailyMeals={allMeals}
           query={foodListQuery}
           onQueryChange={setFoodListQuery}
           onEdit={openEdit}
@@ -1655,13 +1691,70 @@ export function NutritionDashboard({
                       <div className="analysis-results">
                         {analysis.items.map((item, index) => (
                           <div className="analysis-result" key={`${item.name}-${index}`}>
-                            <div>
-                              <h4>{item.name}</h4>
+                            <div className="analysis-result-main">
+                              <label htmlFor={`analysis-name-${index}`}>음식 이름</label>
+                              <input
+                                id={`analysis-name-${index}`}
+                                value={analysisDrafts[index]?.name ?? item.name}
+                                onChange={(event) =>
+                                  setAnalysisDrafts((current) =>
+                                    current.map((draft, draftIndex) =>
+                                      draftIndex === index
+                                        ? { ...draft, name: event.target.value }
+                                        : draft,
+                                    ),
+                                  )
+                                }
+                              />
                               <p>
-                                {item.portionText} ·{" "}
+                                사진 속 추정량 {item.portionText} ·{" "}
                                 {Math.round(item.nutrition.calories)} kcal · 단백질{" "}
                                 {Math.round(item.nutrition.protein)}g
                               </p>
+                              <div className="consumed-amount">
+                                <label htmlFor={`analysis-mode-${index}`}>실제로 먹은 양</label>
+                                <select
+                                  id={`analysis-mode-${index}`}
+                                  value={analysisDrafts[index]?.amountMode ?? "percent"}
+                                  onChange={(event) =>
+                                    setAnalysisDrafts((current) =>
+                                      current.map((draft, draftIndex) =>
+                                        draftIndex === index
+                                          ? {
+                                              ...draft,
+                                              amountMode: event.target.value as "percent" | "grams",
+                                              amount:
+                                                event.target.value === "grams" && item.portionGrams
+                                                  ? String(item.portionGrams)
+                                                  : "100",
+                                            }
+                                          : draft,
+                                      ),
+                                    )
+                                  }
+                                >
+                                  <option value="percent">사진 속 양의 %</option>
+                                  {item.portionGrams && <option value="grams">그램(g)</option>}
+                                </select>
+                                <input
+                                  inputMode="decimal"
+                                  min="0"
+                                  type="number"
+                                  value={analysisDrafts[index]?.amount ?? "100"}
+                                  onChange={(event) =>
+                                    setAnalysisDrafts((current) =>
+                                      current.map((draft, draftIndex) =>
+                                        draftIndex === index
+                                          ? { ...draft, amount: event.target.value }
+                                          : draft,
+                                      ),
+                                    )
+                                  }
+                                />
+                                <span>
+                                  {analysisDrafts[index]?.amountMode === "grams" ? "g" : "%"}
+                                </span>
+                              </div>
                             </div>
                             <span className="confidence">
                               신뢰도 {Math.round(item.confidence * 100)}%
@@ -2091,12 +2184,14 @@ export function NutritionDashboard({
 function FoodListPanel({
   loading,
   meals,
+  dailyMeals,
   query,
   onQueryChange,
   onEdit,
 }: {
   loading: boolean;
   meals: MealRecord[];
+  dailyMeals: MealRecord[];
   query: string;
   onQueryChange: (query: string) => void;
   onEdit: (meal: MealRecord) => void;
@@ -2105,6 +2200,17 @@ function FoodListPanel({
     10,
     ...meals.flatMap((meal) => [meal.carbs, meal.protein, meal.fat]),
   );
+  const dailyTotals = useMemo(() => {
+    const days = new Map<string, MealRecord[]>();
+    for (const meal of dailyMeals) {
+      const rows = days.get(meal.mealDate) ?? [];
+      rows.push(meal);
+      days.set(meal.mealDate, rows);
+    }
+    return [...days.entries()]
+      .map(([date, rows]) => ({ date, ...sumNutrition(rows) }))
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [dailyMeals]);
   return (
     <section className="food-list-panel" aria-labelledby="food-list-title">
       <div className="food-list-heading">
@@ -2123,6 +2229,49 @@ function FoodListPanel({
           />
         </label>
       </div>
+      {!loading && dailyTotals.length > 0 && (
+        <div className="daily-goal-section">
+          <div className="daily-goal-heading">
+            <strong>날짜별 목표 달성</strong>
+            <span>칼로리 2,000 kcal · 탄 250g · 단 100g · 지 65g 기준</span>
+          </div>
+          <div className="daily-goal-list">
+            {dailyTotals.map((day) => (
+              <article className="daily-goal-card" key={day.date}>
+                <strong>{day.date}</strong>
+                {[
+                  ["칼", day.calories, 2000, "kcal", "calories"],
+                  ["탄", day.carbs, 250, "g", "carbs"],
+                  ["단", day.protein, 100, "g", "protein"],
+                  ["지", day.fat, 65, "g", "fat"],
+                ].map(([label, value, goal, unit, nutrient]) => {
+                  const numericValue = Number(value);
+                  const numericGoal = Number(goal);
+                  const percent = Math.round((numericValue / numericGoal) * 100);
+                  return (
+                    <div className="daily-goal-row" key={String(label)}>
+                      <span className={`daily-goal-label ${nutrient}`}>{label}</span>
+                      <span className="daily-goal-track" aria-hidden="true">
+                        <span
+                          className={`daily-goal-fill ${nutrient}`}
+                          style={{ width: `${Math.min(100, percent)}%` }}
+                        />
+                      </span>
+                      <span className="daily-goal-value">
+                        <strong>{Math.round(numericValue).toLocaleString()}</strong>
+                        /{numericGoal.toLocaleString()}{unit}
+                      </span>
+                      <strong className={percent > 100 ? "over-goal" : ""}>
+                        {percent}%
+                      </strong>
+                    </div>
+                  );
+                })}
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
       {loading ? (
         <div className="food-list-loading" aria-live="polite">
           <Skeleton
