@@ -308,12 +308,6 @@ const legacyNutritionClient: NutritionClient = {
 };
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
-const MEAL_ICONS: Record<string, string> = {
-  아침: "◐",
-  점심: "●",
-  저녁: "◒",
-  간식: "✦",
-};
 const SOURCE_LABELS: Record<SourceType, string> = {
   database: "검증 DB",
   label: "표시값",
@@ -483,6 +477,51 @@ function sumNutrition(rows: MealRecord[]) {
   );
 }
 
+function mealTypeFromTime(time?: string) {
+  if (!time) return "간식";
+  const [hour, minute] = time.split(":").map(Number);
+  const minutes = hour * 60 + minute;
+  if (!Number.isFinite(minutes)) return "간식";
+  if (minutes >= 5 * 60 && minutes < 11 * 60) return "아침";
+  if (minutes >= 11 * 60 && minutes < 15 * 60) return "점심";
+  if (minutes >= 17 * 60 && minutes < 23 * 60) return "저녁";
+  return "간식";
+}
+
+function mealTypeClass(mealType: string) {
+  if (mealType === "아침") return "breakfast";
+  if (mealType === "점심") return "lunch";
+  if (mealType === "저녁") return "dinner";
+  return "snack";
+}
+
+type MealOccasion = ReturnType<typeof sumNutrition> & {
+  key: string;
+  mealDate: string;
+  mealTime?: string;
+  mealType: string;
+};
+
+function groupMealOccasions(rows: MealRecord[]): MealOccasion[] {
+  const groups = new Map<string, MealRecord[]>();
+  for (const meal of rows) {
+    const occasionKey = meal.photoId
+      ? `${meal.mealDate}|photo:${meal.photoId}`
+      : `${meal.mealDate}|${meal.mealType}|${meal.mealTime || "시간 미입력"}`;
+    const existing = groups.get(occasionKey) ?? [];
+    existing.push(meal);
+    groups.set(occasionKey, existing);
+  }
+
+  return [...groups.entries()].map(([key, meals]) => ({
+    key,
+    mealDate: meals[0].mealDate,
+    mealTime: meals[0].mealTime,
+    mealType: meals[0].mealType,
+    ...sumNutrition(meals),
+  }));
+}
+
 function sourceClass(source: SourceType) {
   return source === "database" || source === "manual" ? "" : source;
 }
@@ -494,12 +533,6 @@ function displayDate(key: string) {
     day: "numeric",
     weekday: "long",
   }).format(date);
-}
-
-function formatMinutes(minutes: number) {
-  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(
-    minutes % 60,
-  ).padStart(2, "0")}`;
 }
 
 function goalsForDay(goals: NutritionGoals, dayType: DayType) {
@@ -553,6 +586,8 @@ export function NutritionDashboard({
     "saved",
   );
   const [manual, setManual] = useState(emptyManual(selectedDate));
+  const [loadedSavedFood, setLoadedSavedFood] = useState<SavedFood | null>(null);
+  const [savedFoodQuantity, setSavedFoodQuantity] = useState("1");
   const [editingMeal, setEditingMeal] = useState<MealRecord | null>(null);
   const [editForm, setEditForm] = useState(emptyManual(selectedDate));
   const [updating, setUpdating] = useState(false);
@@ -735,6 +770,7 @@ export function NutritionDashboard({
 
   const monthInsights = useMemo(() => {
     const actualMeals = meals.filter((meal) => !meal.demo);
+    const occasions = groupMealOccasions(actualMeals);
     const days = new Map<string, MealRecord[]>();
     for (const meal of actualMeals) {
       const rows = days.get(meal.mealDate) ?? [];
@@ -748,27 +784,41 @@ export function NutritionDashboard({
     const dayCount = days.size;
     const mealTypes = ["아침", "점심", "저녁", "간식"].map((type) => ({
       type,
-      count: actualMeals.filter((meal) => meal.mealType === type).length,
+      count: occasions.filter((occasion) => occasion.mealType === type).length,
     }));
-    const mealTimes = ["아침", "점심", "저녁", "간식"].map((type) => {
-      const minutes = actualMeals
-        .filter((meal) => meal.mealType === type && meal.mealTime)
-        .map((meal) => {
-          const [hour, minute] = (meal.mealTime ?? "").split(":").map(Number);
-          return hour * 60 + minute;
-        })
-        .filter(Number.isFinite);
-      return {
-        type,
-        count: minutes.length,
-        averageMinutes: minutes.length
-          ? Math.round(minutes.reduce((sum, value) => sum + value, 0) / minutes.length)
-          : null,
-        earliestMinutes: minutes.length ? Math.min(...minutes) : null,
-        latestMinutes: minutes.length ? Math.max(...minutes) : null,
+    const timeBuckets = new Map<number, ReturnType<typeof sumNutrition>>();
+    for (const occasion of occasions) {
+      const hour = Number(occasion.mealTime?.slice(0, 2));
+      if (!Number.isInteger(hour) || hour < 0 || hour > 23) continue;
+      const current = timeBuckets.get(hour) ?? {
+        calories: 0,
+        carbs: 0,
+        protein: 0,
+        fat: 0,
       };
-    });
-    return { dayCount, dailyTotals, totals, mealTypes, mealTimes };
+      timeBuckets.set(hour, {
+        calories: current.calories + occasion.calories,
+        carbs: current.carbs + occasion.carbs,
+        protein: current.protein + occasion.protein,
+        fat: current.fat + occasion.fat,
+      });
+    }
+    const nutritionTimeBuckets = [...timeBuckets.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([hour, total]) => ({
+        hour,
+        calories: total.calories / Math.max(dayCount, 1),
+        carbs: total.carbs / Math.max(dayCount, 1),
+        protein: total.protein / Math.max(dayCount, 1),
+        fat: total.fat / Math.max(dayCount, 1),
+      }));
+    return {
+      dayCount,
+      dailyTotals,
+      totals,
+      mealTypes,
+      nutritionTimeBuckets,
+    };
   }, [meals]);
 
   const filteredAllMeals = useMemo(() => {
@@ -798,22 +848,32 @@ export function NutritionDashboard({
     setSavedFoodsLoading(true);
     setModalOpen(true);
     setManual(emptyManual(selectedDate));
+    setLoadedSavedFood(null);
+    setSavedFoodQuantity("1");
+  }
+
+  function applySavedFoodQuantity(food: SavedFood, quantity: number) {
+    const multiplier = Math.max(0, quantity);
+    setManual((current) => ({
+      ...current,
+      foodName: food.name,
+      servingAmount: String(food.servingAmount * multiplier),
+      servingUnit: food.servingUnit,
+      calories: String(food.calories * multiplier),
+      carbs: String(food.carbs * multiplier),
+      protein: String(food.protein * multiplier),
+      fat: String(food.fat * multiplier),
+      sugar: String(food.sugar * multiplier),
+      sodium: String(food.sodium * multiplier),
+      fiber: String(food.fiber * multiplier),
+    }));
   }
 
   function loadSavedFood(food: SavedFood) {
-    setManual({
-      ...emptyManual(selectedDate),
-      foodName: food.name,
-      servingAmount: String(food.servingAmount),
-      servingUnit: food.servingUnit,
-      calories: String(food.calories),
-      carbs: String(food.carbs),
-      protein: String(food.protein),
-      fat: String(food.fat),
-      sugar: String(food.sugar),
-      sodium: String(food.sodium),
-      fiber: String(food.fiber),
-    });
+    setManual(emptyManual(selectedDate));
+    setLoadedSavedFood(food);
+    setSavedFoodQuantity("1");
+    applySavedFoodQuantity(food, 1);
     setActiveTab("manual");
   }
 
@@ -824,6 +884,8 @@ export function NutritionDashboard({
     setAnalysisDrafts([]);
     setBulkPercentPrompt(null);
     setPhotoFile(null);
+    setLoadedSavedFood(null);
+    setSavedFoodQuantity("1");
     if (photoPreview) URL.revokeObjectURL(photoPreview);
     setPhotoPreview("");
   }
@@ -851,7 +913,7 @@ export function NutritionDashboard({
         mealType: manual.mealType,
         foodName: manual.foodName.trim(),
         sourceType: "manual",
-        sourceLabel: "직접 입력",
+        sourceLabel: loadedSavedFood ? "내 음식 DB" : "직접 입력",
         servingAmount: Number(manual.servingAmount) || 1,
         servingUnit: manual.servingUnit || "인분",
         calories: Number(manual.calories) || 0,
@@ -1204,7 +1266,7 @@ export function NutritionDashboard({
           {
             mealDate: photoDate,
             mealTime: photoTime,
-            mealType: "점심",
+            mealType: mealTypeFromTime(photoTime),
             foodName: draft.name.trim() || item.name,
             sourceType: draft.savedFoodId ? "manual" : item.sourceType,
             sourceLabel:
@@ -1572,8 +1634,10 @@ export function NutritionDashboard({
             <div className="meal-list">
               {selectedMeals.map((meal) => (
                 <article className="meal-card" key={meal.id}>
-                  <span className="meal-icon" aria-hidden="true">
-                    {MEAL_ICONS[meal.mealType] ?? "○"}
+                  <span
+                    className={`meal-type-label ${mealTypeClass(meal.mealType)}`}
+                  >
+                    {meal.mealType}
                   </span>
                   <div>
                     <h3 className="meal-name">{meal.foodName}</h3>
@@ -1750,7 +1814,11 @@ export function NutritionDashboard({
                 type="button"
                 role="tab"
                 aria-selected={activeTab === "manual"}
-                onClick={() => setActiveTab("manual")}
+                onClick={() => {
+                  setLoadedSavedFood(null);
+                  setSavedFoodQuantity("1");
+                  setActiveTab("manual");
+                }}
               >
                 직접 입력
               </button>
@@ -1912,6 +1980,13 @@ export function NutritionDashboard({
                         {photoDateSource === "exif"
                           ? "사진의 촬영 날짜와 시간을 가져왔어요. 실제 식사 시간과 다르면 수정해주세요."
                           : "사진에 촬영 시간이 없어 선택한 날짜를 사용합니다. 시간을 확인해주세요."}
+                        {photoTime && (
+                          <>
+                            {" "}
+                            이 시간은 <strong>{mealTypeFromTime(photoTime)}</strong>
+                            으로 자동 분류됩니다.
+                          </>
+                        )}
                       </p>
                     </>
                   )}
@@ -2091,6 +2166,40 @@ export function NutritionDashboard({
 
               {activeTab === "manual" && (
                 <form onSubmit={handleManualSubmit}>
+                  {loadedSavedFood && (
+                    <section className="saved-food-quantity">
+                      <div>
+                        <strong>{loadedSavedFood.name}</strong>
+                        <span>
+                          {loadedSavedFood.servingAmount}
+                          {loadedSavedFood.servingUnit}을 1회분으로 계산합니다.
+                        </span>
+                      </div>
+                      <label htmlFor="saved-food-quantity">
+                        수량
+                        <input
+                          id="saved-food-quantity"
+                          inputMode="decimal"
+                          min="0.1"
+                          step="0.1"
+                          type="number"
+                          value={savedFoodQuantity}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setSavedFoodQuantity(value);
+                            applySavedFoodQuantity(
+                              loadedSavedFood,
+                              Number(value) || 0,
+                            );
+                          }}
+                        />
+                      </label>
+                      <p>
+                        수량에 맞춰 섭취량과 모든 영양성분이 계산됩니다. 계산 후 아래
+                        값은 직접 수정할 수 있어요.
+                      </p>
+                    </section>
+                  )}
                   <div className="field-row">
                     <div className="field">
                       <label htmlFor="meal-date">날짜</label>
@@ -2713,36 +2822,28 @@ function ProfilePanel({
         }}
       >
         <h3 className="goal-section-title">나의 영양 목표</h3>
-        {[
-          ["calories", "칼로리", "kcal", "하루 에너지 목표"],
-          ["carbs", "탄수화물", "g", "하루 탄수화물 목표"],
-          ["protein", "단백질", "g", "하루 단백질 목표"],
-          ["fat", "지방", "g", "하루 지방 목표"],
-        ].map(([key, label, unit, description]) => (
-          <label className={`goal-input-card ${key}`} key={key}>
-            <span>{label}</span>
-            <small>{description}</small>
-            <div>
-              <input
-                min="1"
-                inputMode="decimal"
-                type="number"
-                value={form[key as keyof NutritionGoals]}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    [key]: Math.max(1, Number(event.target.value) || 1),
-                  })
-                }
-              />
-              <strong>{unit}</strong>
-            </div>
-          </label>
-        ))}
-        <div className="reference-goals">
-          {[
+        <p className="goal-section-description">
+          캘린더에서 날짜 유형을 선택하면 해당 목표가 식단 진행률에 적용됩니다.
+        </p>
+        <div className="day-goal-grid">
+          {([
             {
-              title: "운동일 참고 목표",
+              key: "default",
+              title: "기본일",
+              description:
+                "특별한 운동이나 완전한 휴식이 아닌, 평소 생활 패턴을 보내는 날입니다.",
+              fields: [
+                ["calories", "칼로리", "kcal"],
+                ["carbs", "탄수화물", "g"],
+                ["protein", "단백질", "g"],
+                ["fat", "지방", "g"],
+              ],
+            },
+            {
+              key: "exercise",
+              title: "운동일",
+              description:
+                "근력·유산소 등 계획한 운동을 한 날입니다. 활동량에 맞춰 에너지와 탄수화물 범위를 높입니다.",
               fields: [
                 ["exerciseCaloriesMin", "칼로리 최소", "kcal"],
                 ["exerciseCaloriesMax", "칼로리 최대", "kcal"],
@@ -2754,7 +2855,10 @@ function ProfilePanel({
               ],
             },
             {
-              title: "휴식일 참고 목표",
+              key: "rest",
+              title: "휴식일",
+              description:
+                "계획한 운동 없이 회복에 집중하는 날입니다. 단백질·지방은 유지하고 에너지와 탄수화물은 낮춥니다.",
               fields: [
                 ["restCalories", "칼로리", "kcal"],
                 ["restCarbsMin", "탄수화물 최소", "g"],
@@ -2763,18 +2867,30 @@ function ProfilePanel({
                 ["restFat", "지방", "g"],
               ],
             },
-          ].map((section) => (
-            <section className="reference-goal-card" key={section.title}>
-              <h3>{section.title}</h3>
-              <div>
+          ] as Array<{
+            key: DayType;
+            title: string;
+            description: string;
+            fields: Array<[keyof NutritionGoals, string, string]>;
+          }>).map((section) => (
+            <section
+              className={`day-goal-card ${section.key}`}
+              key={section.key}
+            >
+              <header>
+                <span>{section.title}</span>
+                <p>{section.description}</p>
+              </header>
+              <div className="day-goal-fields">
                 {section.fields.map(([key, label, unit]) => (
                   <label key={key}>
                     <span>{label}</span>
                     <div>
                       <input
                         min="1"
+                        inputMode="decimal"
                         type="number"
-                        value={form[key as keyof NutritionGoals]}
+                        value={form[key]}
                         onChange={(event) =>
                           setForm({
                             ...form,
@@ -2791,7 +2907,7 @@ function ProfilePanel({
           ))}
         </div>
         <button className="primary-button wide-button" type="submit">
-          하루 목표 저장
+          영양 목표 저장
         </button>
       </form>
     </section>
@@ -2917,12 +3033,12 @@ function InsightsPanel({
     dailyTotals: Array<ReturnType<typeof sumNutrition> & { date: string }>;
     totals: ReturnType<typeof sumNutrition>;
     mealTypes: Array<{ type: string; count: number }>;
-    mealTimes: Array<{
-      type: string;
-      count: number;
-      averageMinutes: number | null;
-      earliestMinutes: number | null;
-      latestMinutes: number | null;
+    nutritionTimeBuckets: Array<{
+      hour: number;
+      calories: number;
+      carbs: number;
+      protein: number;
+      fat: number;
     }>;
   };
   onChangeMonth: (offset: number) => void;
@@ -2936,6 +3052,10 @@ function InsightsPanel({
   const totalMeals = insights.mealTypes.reduce(
     (total, item) => total + item.count,
     0,
+  );
+  const maxTimeCalories = Math.max(
+    1,
+    ...insights.nutritionTimeBuckets.map((item) => item.calories),
   );
 
   return (
@@ -2982,7 +3102,7 @@ function InsightsPanel({
           <article className="insight-card">
             <span className="insight-label">기록한 날</span>
             <strong>{insights.dayCount}<small>일</small></strong>
-            <p>총 {totalMeals}개의 음식 기록</p>
+            <p>같은 사진과 같은 시간의 음식을 묶어 총 {totalMeals}끼</p>
           </article>
           <article className="insight-card">
             <span className="insight-label">하루 평균 열량</span>
@@ -3032,32 +3152,84 @@ function InsightsPanel({
           </article>
           <article className="insight-card meal-time-card">
             <div>
-              <span className="insight-label">평균 식사 시간</span>
-              <p>시간이 입력된 기록을 기준으로 식사 리듬을 보여줍니다.</p>
+              <span className="insight-label">시간대별 영양 섭취</span>
+              <p>
+                막대 높이는 하루 평균 칼로리, 색 구간은 탄수화물·단백질·지방의
+                열량 기여도입니다.
+              </p>
             </div>
-            <div className="meal-time-list">
-              {insights.mealTimes.map((item) => (
-                <div className="meal-time-row" key={item.type}>
-                  <span>{item.type}</span>
-                  {item.averageMinutes === null ? (
-                    <small>시간 기록 없음</small>
-                  ) : (
-                    <>
-                      <div className="time-track" aria-hidden="true">
-                        <span
-                          style={{ left: `${(item.averageMinutes / 1440) * 100}%` }}
-                        />
+            <div className="time-nutrition-legend" aria-label="그래프 범례">
+              <span className="calories">막대 높이 · 칼로리</span>
+              <span className="carbs">탄수화물</span>
+              <span className="protein">단백질</span>
+              <span className="fat">지방</span>
+            </div>
+            {insights.nutritionTimeBuckets.length === 0 ? (
+              <p className="time-nutrition-empty">
+                먹은 시간을 입력하면 시간대별 영양 그래프가 표시됩니다.
+              </p>
+            ) : (
+              <div
+                className="time-nutrition-chart"
+                aria-label="시간대별 하루 평균 칼로리와 탄수화물, 단백질, 지방"
+              >
+                {insights.nutritionTimeBuckets.map((item) => {
+                  const carbsCalories = item.carbs * 4;
+                  const proteinCalories = item.protein * 4;
+                  const fatCalories = item.fat * 9;
+                  const macroCalories = Math.max(
+                    carbsCalories + proteinCalories + fatCalories,
+                    1,
+                  );
+                  const title = `${String(item.hour).padStart(2, "0")}시 · ${Math.round(
+                    item.calories,
+                  )} kcal · 탄 ${item.carbs.toFixed(1)}g · 단 ${item.protein.toFixed(
+                    1,
+                  )}g · 지 ${item.fat.toFixed(1)}g`;
+                  return (
+                    <div className="time-nutrition-column" key={item.hour} title={title}>
+                      <strong>
+                        {Math.round(item.calories)}
+                        <small> kcal</small>
+                      </strong>
+                      <div className="time-bar-slot" aria-hidden="true">
+                        <div
+                          className="time-stacked-bar"
+                          style={{
+                            height: `${Math.max(
+                              8,
+                              (item.calories / maxTimeCalories) * 100,
+                            )}%`,
+                          }}
+                        >
+                          <span
+                            className="macro-fat"
+                            style={{ height: `${(fatCalories / macroCalories) * 100}%` }}
+                          />
+                          <span
+                            className="macro-protein"
+                            style={{
+                              height: `${(proteinCalories / macroCalories) * 100}%`,
+                            }}
+                          />
+                          <span
+                            className="macro-carbs"
+                            style={{
+                              height: `${(carbsCalories / macroCalories) * 100}%`,
+                            }}
+                          />
+                        </div>
                       </div>
-                      <strong>{formatMinutes(item.averageMinutes)}</strong>
+                      <span>{String(item.hour).padStart(2, "0")}시</span>
                       <small>
-                        {item.count}회 · {formatMinutes(item.earliestMinutes!)}–
-                        {formatMinutes(item.latestMinutes!)}
+                        탄 {Math.round(item.carbs)} · 단 {Math.round(item.protein)} · 지{" "}
+                        {Math.round(item.fat)}g
                       </small>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </article>
         </div>
       )}
