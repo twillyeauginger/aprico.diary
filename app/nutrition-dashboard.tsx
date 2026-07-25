@@ -102,6 +102,10 @@ export type SavedFood = {
 
 export type SavedFoodInput = Omit<SavedFood, "id">;
 export type DayType = "default" | "exercise" | "rest";
+export type CalendarSettings = {
+  dayTypes: Record<string, DayType>;
+  completedDays: Record<string, boolean>;
+};
 
 export type NutritionGoals = {
   goalType: string;
@@ -158,8 +162,12 @@ export type NutritionClient = {
   deleteSavedFood(id: SavedFood["id"]): Promise<void>;
   getNutritionGoals(): Promise<NutritionGoals>;
   updateNutritionGoals(goals: NutritionGoals): Promise<NutritionGoals>;
-  listDayTypes(month: string): Promise<Record<string, DayType>>;
-  setDayType(date: string, dayType: DayType): Promise<void>;
+  listCalendarSettings(month: string): Promise<CalendarSettings>;
+  setCalendarSettings(
+    date: string,
+    dayType: DayType,
+    isComplete: boolean,
+  ): Promise<void>;
   searchFoods(query: string): Promise<FoodResult[]>;
   analyzePhoto(file: File): Promise<AnalysisResult>;
 };
@@ -257,18 +265,18 @@ const legacyNutritionClient: NutritionClient = {
     if (!response.ok || !body.goals) throw new Error(body.error ?? "목표를 저장하지 못했습니다.");
     return body.goals;
   },
-  async listDayTypes(month) {
+  async listCalendarSettings(month) {
     const response = await fetch(`/api/day-types?month=${month}`);
-    if (!response.ok) return {};
-    return ((await response.json()) as { dayTypes: Record<string, DayType> }).dayTypes;
+    if (!response.ok) return { dayTypes: {}, completedDays: {} };
+    return (await response.json()) as CalendarSettings;
   },
-  async setDayType(date, dayType) {
+  async setCalendarSettings(date, dayType, isComplete) {
     const response = await fetch("/api/day-types", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ date, dayType }),
+      body: JSON.stringify({ date, dayType, isComplete }),
     });
-    if (!response.ok) throw new Error("날짜 유형을 저장하지 못했습니다.");
+    if (!response.ok) throw new Error("날짜 설정을 저장하지 못했습니다.");
   },
   async searchFoods(query) {
     const response = await fetch(`/api/foods?q=${encodeURIComponent(query)}`);
@@ -557,6 +565,216 @@ function goalsForDay(goals: NutritionGoals, dayType: DayType) {
   return goals;
 }
 
+type AdherenceMetric = "calories" | "carbs" | "protein" | "fat";
+
+const ADHERENCE_METRICS: Array<{
+  key: AdherenceMetric;
+  label: string;
+  unit: string;
+}> = [
+  { key: "calories", label: "칼로리", unit: "kcal" },
+  { key: "carbs", label: "탄수화물", unit: "g" },
+  { key: "protein", label: "단백질", unit: "g" },
+  { key: "fat", label: "지방", unit: "g" },
+];
+
+type AdherenceResult = {
+  date: string;
+  status: "empty" | "recording" | "close" | "off";
+  level: number;
+  dominantMetric?: AdherenceMetric;
+  direction?: "over" | "under";
+  values: ReturnType<typeof sumNutrition>;
+  ranges: Record<AdherenceMetric, { min: number; max: number; target: number }>;
+};
+
+function adherenceRanges(
+  goals: NutritionGoals,
+  dayType: DayType,
+): AdherenceResult["ranges"] {
+  if (dayType === "exercise") {
+    return {
+      calories: {
+        min: goals.exerciseCaloriesMin,
+        max: goals.exerciseCaloriesMax,
+        target: (goals.exerciseCaloriesMin + goals.exerciseCaloriesMax) / 2,
+      },
+      carbs: {
+        min: goals.exerciseCarbsMin,
+        max: goals.exerciseCarbsMax,
+        target: (goals.exerciseCarbsMin + goals.exerciseCarbsMax) / 2,
+      },
+      protein: {
+        min: goals.exerciseProteinMin,
+        max: goals.exerciseProteinMax,
+        target: (goals.exerciseProteinMin + goals.exerciseProteinMax) / 2,
+      },
+      fat: {
+        min: goals.exerciseFat * 0.85,
+        max: goals.exerciseFat * 1.15,
+        target: goals.exerciseFat,
+      },
+    };
+  }
+  if (dayType === "rest") {
+    return {
+      calories: {
+        min: goals.restCalories * 0.9,
+        max: goals.restCalories * 1.1,
+        target: goals.restCalories,
+      },
+      carbs: {
+        min: goals.restCarbsMin,
+        max: goals.restCarbsMax,
+        target: (goals.restCarbsMin + goals.restCarbsMax) / 2,
+      },
+      protein: {
+        min: goals.restProtein * 0.85,
+        max: goals.restProtein * 1.15,
+        target: goals.restProtein,
+      },
+      fat: {
+        min: goals.restFat * 0.85,
+        max: goals.restFat * 1.15,
+        target: goals.restFat,
+      },
+    };
+  }
+  return {
+    calories: {
+      min: goals.calories * 0.9,
+      max: goals.calories * 1.1,
+      target: goals.calories,
+    },
+    carbs: {
+      min: goals.carbs * 0.85,
+      max: goals.carbs * 1.15,
+      target: goals.carbs,
+    },
+    protein: {
+      min: goals.protein * 0.85,
+      max: goals.protein * 1.15,
+      target: goals.protein,
+    },
+    fat: {
+      min: goals.fat * 0.85,
+      max: goals.fat * 1.15,
+      target: goals.fat,
+    },
+  };
+}
+
+function configuredGoalLabel(
+  goals: NutritionGoals,
+  dayType: DayType,
+  metric: AdherenceMetric,
+) {
+  if (dayType === "exercise") {
+    if (metric === "calories") {
+      return `${goals.exerciseCaloriesMin.toLocaleString()}–${goals.exerciseCaloriesMax.toLocaleString()}`;
+    }
+    if (metric === "carbs") {
+      return `${goals.exerciseCarbsMin}–${goals.exerciseCarbsMax}`;
+    }
+    if (metric === "protein") {
+      return `${goals.exerciseProteinMin}–${goals.exerciseProteinMax}`;
+    }
+    return goals.exerciseFat.toLocaleString();
+  }
+  if (dayType === "rest") {
+    if (metric === "calories") return goals.restCalories.toLocaleString();
+    if (metric === "carbs") {
+      return `${goals.restCarbsMin}–${goals.restCarbsMax}`;
+    }
+    if (metric === "protein") return goals.restProtein.toLocaleString();
+    return goals.restFat.toLocaleString();
+  }
+  return goals[metric].toLocaleString();
+}
+
+function evaluateAdherence({
+  date,
+  values,
+  goals,
+  dayType,
+  isComplete,
+  hasRecords,
+}: {
+  date: string;
+  values: ReturnType<typeof sumNutrition>;
+  goals: NutritionGoals;
+  dayType: DayType;
+  isComplete: boolean;
+  hasRecords: boolean;
+}): AdherenceResult {
+  const ranges = adherenceRanges(goals, dayType);
+  if (!isComplete) {
+    return {
+      date,
+      status: hasRecords ? "recording" : "empty",
+      level: 0,
+      values,
+      ranges,
+    };
+  }
+
+  const deviations = ADHERENCE_METRICS.map(({ key }) => {
+    const value = values[key];
+    const range = ranges[key];
+    const signedDeviation =
+      value < range.min
+        ? (value - range.min) / Math.max(range.target, 1)
+        : value > range.max
+          ? (value - range.max) / Math.max(range.target, 1)
+          : 0;
+    return { key, signedDeviation };
+  });
+  const dominant = deviations.reduce((largest, current) =>
+    Math.abs(current.signedDeviation) > Math.abs(largest.signedDeviation)
+      ? current
+      : largest,
+  );
+
+  if (dominant.signedDeviation === 0) {
+    const averageDistance =
+      ADHERENCE_METRICS.reduce((sum, { key }) => {
+        const range = ranges[key];
+        return (
+          sum +
+          Math.abs(values[key] - range.target) / Math.max(range.target, 1)
+        );
+      }, 0) / ADHERENCE_METRICS.length;
+    const level =
+      averageDistance <= 0.03
+        ? 4
+        : averageDistance <= 0.07
+          ? 3
+          : averageDistance <= 0.11
+            ? 2
+            : 1;
+    return { date, status: "close", level, values, ranges };
+  }
+
+  const deviationAmount = Math.abs(dominant.signedDeviation);
+  const level =
+    deviationAmount >= 0.5
+      ? 4
+      : deviationAmount >= 0.3
+        ? 3
+        : deviationAmount >= 0.15
+          ? 2
+          : 1;
+  return {
+    date,
+    status: "off",
+    level,
+    dominantMetric: dominant.key,
+    direction: dominant.signedDeviation > 0 ? "over" : "under",
+    values,
+    ranges,
+  };
+}
+
 export function NutritionDashboard({
   client = legacyNutritionClient,
   userEmail,
@@ -577,6 +795,9 @@ export function NutritionDashboard({
   const [nutritionGoals, setNutritionGoals] =
     useState<NutritionGoals>(DEFAULT_GOALS);
   const [dayTypes, setDayTypes] = useState<Record<string, DayType>>({});
+  const [completedDays, setCompletedDays] = useState<Record<string, boolean>>(
+    {},
+  );
   const [meals, setMeals] = useState<MealRecord[]>([]);
   const [isDemo, setIsDemo] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -642,8 +863,14 @@ export function NutritionDashboard({
 
   useEffect(() => {
     let cancelled = false;
-    client.listDayTypes(monthKey(viewMonth)).then((types) => {
-      if (!cancelled) setDayTypes((current) => ({ ...current, ...types }));
+    client.listCalendarSettings(monthKey(viewMonth)).then((settings) => {
+      if (!cancelled) {
+        setDayTypes((current) => ({ ...current, ...settings.dayTypes }));
+        setCompletedDays((current) => ({
+          ...current,
+          ...settings.completedDays,
+        }));
+      }
     }).catch(() => undefined);
     return () => {
       cancelled = true;
@@ -803,15 +1030,21 @@ export function NutritionDashboard({
         fat: current.fat + occasion.fat,
       });
     }
-    const nutritionTimeBuckets = [...timeBuckets.entries()]
-      .sort(([left], [right]) => left - right)
-      .map(([hour, total]) => ({
+    const nutritionTimeBuckets = Array.from({ length: 24 }, (_, hour) => {
+      const total = timeBuckets.get(hour) ?? {
+        calories: 0,
+        carbs: 0,
+        protein: 0,
+        fat: 0,
+      };
+      return {
         hour,
         calories: total.calories / Math.max(dayCount, 1),
         carbs: total.carbs / Math.max(dayCount, 1),
         protein: total.protein / Math.max(dayCount, 1),
         fat: total.fat / Math.max(dayCount, 1),
-      }));
+      };
+    });
     return {
       dayCount,
       dailyTotals,
@@ -1563,6 +1796,11 @@ export function NutritionDashboard({
                       {dayTypes[key] === "exercise" ? "운동" : "휴식"}
                     </span>
                   )}
+                  {completedDays[key] && (
+                    <span className="day-complete-mark" aria-label="기록 완료">
+                      ✓
+                    </span>
+                  )}
                   {dayMeals.length > 0 && (
                     <>
                       <span className="day-kcal">
@@ -1594,7 +1832,11 @@ export function NutritionDashboard({
                 type="button"
                 onClick={async () => {
                   try {
-                    await client.setDayType(selectedDate, value);
+                    await client.setCalendarSettings(
+                      selectedDate,
+                      value,
+                      completedDays[selectedDate] ?? false,
+                    );
                     setDayTypes((current) => ({ ...current, [selectedDate]: value }));
                     showToast(`${label}로 설정했어요.`);
                   } catch (error) {
@@ -1606,6 +1848,42 @@ export function NutritionDashboard({
               </button>
             ))}
           </div>
+          <button
+            className={`day-complete-toggle ${
+              completedDays[selectedDate] ? "active" : ""
+            }`}
+            type="button"
+            aria-pressed={completedDays[selectedDate] ?? false}
+            onClick={async () => {
+              const nextValue = !(completedDays[selectedDate] ?? false);
+              try {
+                await client.setCalendarSettings(
+                  selectedDate,
+                  dayTypes[selectedDate] ?? "default",
+                  nextValue,
+                );
+                setCompletedDays((current) => ({
+                  ...current,
+                  [selectedDate]: nextValue,
+                }));
+                showToast(
+                  nextValue
+                    ? "이날의 식사 기록을 완료했어요."
+                    : "기록 중인 날로 되돌렸어요.",
+                );
+              } catch (error) {
+                showToast(
+                  error instanceof Error ? error.message : "저장하지 못했습니다.",
+                );
+              }
+            }}
+          >
+            <span aria-hidden="true">{completedDays[selectedDate] ? "✓" : "○"}</span>
+            <span>
+              <strong>이날 기록 완료</strong>
+              <small>완료한 날만 월간 목표 달성 분석에 포함됩니다.</small>
+            </span>
+          </button>
         </div>
 
         <aside className="panel day-panel">
@@ -1706,6 +1984,9 @@ export function NutritionDashboard({
         <InsightsPanel
           month={viewMonth}
           insights={monthInsights}
+          dayTypes={dayTypes}
+          completedDays={completedDays}
+          goals={nutritionGoals}
           onChangeMonth={changeMonth}
         />
       ) : activeView === "foods" ? (
@@ -2720,7 +3001,8 @@ function FoodListPanel({
           </div>
         </div>
       ) : (
-        <div className="food-table-wrap">
+        <>
+          <div className="food-table-wrap">
           <table className="food-table">
             <thead>
               <tr>
@@ -2783,7 +3065,68 @@ function FoodListPanel({
               ))}
             </tbody>
           </table>
-        </div>
+          </div>
+          <div className="food-mobile-list">
+            {meals.map((meal) => (
+              <article className="food-mobile-card" key={meal.id}>
+              <header>
+                <div>
+                  <span className={`meal-type-label ${mealTypeClass(meal.mealType)}`}>
+                    {meal.mealType}
+                  </span>
+                  <div>
+                    <h3>{meal.foodName}</h3>
+                    <p>
+                      {meal.mealDate} · {meal.mealTime || "시간 미입력"} ·{" "}
+                      {meal.servingAmount}
+                      {meal.servingUnit}
+                    </p>
+                  </div>
+                </div>
+                <strong>
+                  {Math.round(meal.calories).toLocaleString()}
+                  <small>kcal</small>
+                </strong>
+              </header>
+              <div className="food-mobile-nutrients">
+                <span className="carbs">
+                  <small>탄수화물</small>
+                  <strong>{meal.carbs.toFixed(1)}g</strong>
+                </span>
+                <span className="protein">
+                  <small>단백질</small>
+                  <strong>{meal.protein.toFixed(1)}g</strong>
+                </span>
+                <span className="fat">
+                  <small>지방</small>
+                  <strong>{meal.fat.toFixed(1)}g</strong>
+                </span>
+              </div>
+              <footer>
+                <div>
+                  <span className={`source-badge ${sourceClass(meal.sourceType)}`}>
+                    {meal.sourceLabel || SOURCE_LABELS[meal.sourceType]}
+                  </span>
+                  <small>
+                    100kcal당 단백질{" "}
+                    {Math.round(
+                      (meal.protein / Math.max(meal.calories, 1)) * 100,
+                    )}
+                    g
+                  </small>
+                </div>
+                <button
+                  className="table-edit-button"
+                  type="button"
+                  onClick={() => onEdit(meal)}
+                >
+                  수정
+                </button>
+              </footer>
+              </article>
+            ))}
+          </div>
+        </>
       )}
     </section>
   );
@@ -3025,6 +3368,9 @@ function SavedFoodPanel({
 function InsightsPanel({
   month,
   insights,
+  dayTypes,
+  completedDays,
+  goals,
   onChangeMonth,
 }: {
   month: Date;
@@ -3041,8 +3387,15 @@ function InsightsPanel({
       fat: number;
     }>;
   };
+  dayTypes: Record<string, DayType>;
+  completedDays: Record<string, boolean>;
+  goals: NutritionGoals;
   onChangeMonth: (offset: number) => void;
 }) {
+  const [selectedHeatmapDate, setSelectedHeatmapDate] = useState<string | null>(
+    null,
+  );
+  const [selectedTimeHour, setSelectedTimeHour] = useState<number | null>(null);
   const averageCalories =
     insights.totals.calories / Math.max(insights.dayCount, 1);
   const maxCalories = Math.max(
@@ -3053,9 +3406,85 @@ function InsightsPanel({
     (total, item) => total + item.count,
     0,
   );
-  const maxTimeCalories = Math.max(
+  const dailyTotalsByDate = useMemo(
+    () => new Map(insights.dailyTotals.map((day) => [day.date, day])),
+    [insights.dailyTotals],
+  );
+  const adherenceDays = useMemo(() => {
+    const daysInMonth = new Date(
+      month.getFullYear(),
+      month.getMonth() + 1,
+      0,
+    ).getDate();
+    return Array.from({ length: daysInMonth }, (_, index) => {
+      const date = dateKey(
+        new Date(month.getFullYear(), month.getMonth(), index + 1),
+      );
+      const values = dailyTotalsByDate.get(date) ?? {
+        calories: 0,
+        carbs: 0,
+        protein: 0,
+        fat: 0,
+      };
+      return evaluateAdherence({
+        date,
+        values,
+        goals,
+        dayType: dayTypes[date] ?? "default",
+        isComplete: completedDays[date] ?? false,
+        hasRecords: dailyTotalsByDate.has(date),
+      });
+    });
+  }, [completedDays, dailyTotalsByDate, dayTypes, goals, month]);
+  const completedAdherenceDays = adherenceDays.filter(
+    (day) => day.status === "close" || day.status === "off",
+  );
+  const closeDayCount = completedAdherenceDays.filter(
+    (day) => day.status === "close",
+  ).length;
+  const dominantDeviation = ADHERENCE_METRICS.map((metric) => ({
+    ...metric,
+    count: completedAdherenceDays.filter(
+      (day) => day.status === "off" && day.dominantMetric === metric.key,
+    ).length,
+  })).sort((left, right) => right.count - left.count)[0];
+  const recentStreak = (() => {
+    const completed = [...completedAdherenceDays].sort((left, right) =>
+      right.date.localeCompare(left.date),
+    );
+    if (completed[0]?.status !== "close") return 0;
+    let streak = 1;
+    for (let index = 1; index < completed.length; index += 1) {
+      if (completed[index].status !== "close") break;
+      const previous = new Date(`${completed[index - 1].date}T12:00:00`);
+      previous.setDate(previous.getDate() - 1);
+      if (dateKey(previous) !== completed[index].date) break;
+      streak += 1;
+    }
+    return streak;
+  })();
+  const selectedAdherence =
+    adherenceDays.find((day) => day.date === selectedHeatmapDate) ?? null;
+  const heatmapLeadingCells = new Date(
+    month.getFullYear(),
+    month.getMonth(),
     1,
-    ...insights.nutritionTimeBuckets.map((item) => item.calories),
+  ).getDay();
+  const timeMetrics: Array<{
+    key: AdherenceMetric;
+    label: string;
+    unit: string;
+  }> = ADHERENCE_METRICS;
+  const selectedTimeBucket =
+    insights.nutritionTimeBuckets.find(
+      (bucket) => bucket.hour === selectedTimeHour,
+    ) ?? null;
+  const hasTimedNutrition = insights.nutritionTimeBuckets.some(
+    (bucket) =>
+      bucket.calories > 0 ||
+      bucket.carbs > 0 ||
+      bucket.protein > 0 ||
+      bucket.fat > 0,
   );
 
   return (
@@ -3090,7 +3519,7 @@ function InsightsPanel({
         </div>
       </div>
 
-      {insights.dayCount === 0 ? (
+      {insights.dayCount === 0 && completedAdherenceDays.length === 0 ? (
         <div className="empty-state insights-empty">
           <div>
             <strong>아직 분석할 기록이 없어요.</strong>
@@ -3108,6 +3537,154 @@ function InsightsPanel({
             <span className="insight-label">하루 평균 열량</span>
             <strong>{Math.round(averageCalories).toLocaleString()}<small>kcal</small></strong>
             <p>기록이 있는 날짜 기준</p>
+          </article>
+          <article className="insight-card goal-heatmap-card">
+            <div className="goal-heatmap-heading">
+              <div>
+                <span className="insight-label">월간 목표 리듬</span>
+                <p>
+                  기록 완료한 날은 목표에 가까울수록 진한 녹색, 벗어난 날은 가장
+                  차이가 큰 항목의 색으로 표시합니다. 기본일의 근접 범위는 칼로리
+                  ±10%, 탄단지 ±15%입니다.
+                </p>
+              </div>
+              <div className="goal-heatmap-summary">
+                <span>
+                  목표 근접 <strong>{closeDayCount}</strong>/
+                  {completedAdherenceDays.length}일
+                </span>
+                <span>
+                  자주 벗어난 항목{" "}
+                  <strong>
+                    {dominantDeviation.count > 0
+                      ? dominantDeviation.label
+                      : "아직 없음"}
+                  </strong>
+                </span>
+                <span>
+                  최근 연속 <strong>{recentStreak}일</strong>
+                </span>
+              </div>
+            </div>
+            <div className="goal-heatmap-legend" aria-label="목표 리듬 범례">
+              <span className="close">목표 근접</span>
+              <span className="calories">칼로리 차이</span>
+              <span className="carbs">탄수화물 차이</span>
+              <span className="protein">단백질 차이</span>
+              <span className="fat">지방 차이</span>
+              <span className="recording">기록 중</span>
+            </div>
+            <div className="goal-heatmap-weekdays" aria-hidden="true">
+              {WEEKDAYS.map((weekday) => (
+                <span key={weekday}>{weekday}</span>
+              ))}
+            </div>
+            <div className="goal-heatmap" aria-label="날짜별 영양 목표 달성">
+              {Array.from({ length: heatmapLeadingCells }, (_, index) => (
+                <span className="goal-day-placeholder" key={`blank-${index}`} />
+              ))}
+              {adherenceDays.map((day) => {
+                const dominantLabel = ADHERENCE_METRICS.find(
+                  (metric) => metric.key === day.dominantMetric,
+                )?.label;
+                const statusLabel =
+                  day.status === "close"
+                    ? "목표 근접"
+                    : day.status === "off"
+                      ? `${dominantLabel} ${
+                          day.direction === "over" ? "초과" : "부족"
+                        }`
+                      : day.status === "recording"
+                        ? "기록 중"
+                        : "기록 없음";
+                return (
+                  <button
+                    className={[
+                      "goal-day",
+                      day.status,
+                      day.dominantMetric ?? "",
+                      `level-${day.level}`,
+                      selectedHeatmapDate === day.date ? "selected" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    key={day.date}
+                    type="button"
+                    title={`${day.date} · ${statusLabel}`}
+                    aria-label={`${day.date}, ${statusLabel}`}
+                    onClick={() => setSelectedHeatmapDate(day.date)}
+                  >
+                    <span>{Number(day.date.slice(-2))}</span>
+                    {day.status === "off" && (
+                      <small aria-hidden="true">
+                        {day.direction === "over" ? "↑" : "↓"}
+                      </small>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {selectedAdherence && (
+              <div className="goal-day-detail" aria-live="polite">
+                <div>
+                  <strong>{displayDate(selectedAdherence.date)}</strong>
+                  <span>
+                    {dayTypes[selectedAdherence.date] === "exercise"
+                      ? "운동일"
+                      : dayTypes[selectedAdherence.date] === "rest"
+                        ? "휴식일"
+                        : "기본일"}
+                  </span>
+                </div>
+                {selectedAdherence.status === "empty" ? (
+                  <p>아직 기록한 음식이 없어요.</p>
+                ) : selectedAdherence.status === "recording" ? (
+                  <p>
+                    기록 중인 날입니다. 캘린더에서 ‘이날 기록 완료’를 선택하면
+                    목표 달성을 평가합니다.
+                  </p>
+                ) : (
+                  <>
+                    <p>
+                      {selectedAdherence.status === "close"
+                        ? "칼로리와 탄단지가 모두 목표 범위에 가까워요."
+                        : `${ADHERENCE_METRICS.find(
+                            (metric) =>
+                              metric.key === selectedAdherence.dominantMetric,
+                          )?.label}이 목표보다 ${
+                            selectedAdherence.direction === "over"
+                              ? "많았어요."
+                              : "적었어요."
+                          }`}
+                    </p>
+                    <div className="goal-day-detail-values">
+                      {ADHERENCE_METRICS.map((metric) => {
+                        const targetLabel = configuredGoalLabel(
+                          goals,
+                          dayTypes[selectedAdherence.date] ?? "default",
+                          metric.key,
+                        );
+                        return (
+                          <span className={metric.key} key={metric.key}>
+                            <small>{metric.label}</small>
+                            <strong>
+                              {Math.round(
+                                selectedAdherence.values[metric.key],
+                              ).toLocaleString()}
+                              {metric.unit}
+                            </strong>
+                            <small>
+                              목표 {targetLabel}
+                              {metric.unit}
+                            </small>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </article>
           <article className="insight-card trend-card">
             <div>
@@ -3154,80 +3731,84 @@ function InsightsPanel({
             <div>
               <span className="insight-label">시간대별 영양 섭취</span>
               <p>
-                막대 높이는 하루 평균 칼로리, 색 구간은 탄수화물·단백질·지방의
-                열량 기여도입니다.
+                00시부터 23시까지, 각 항목의 하루 평균 섭취량을 독립된 막대로
+                비교합니다.
               </p>
             </div>
-            <div className="time-nutrition-legend" aria-label="그래프 범례">
-              <span className="calories">막대 높이 · 칼로리</span>
-              <span className="carbs">탄수화물</span>
-              <span className="protein">단백질</span>
-              <span className="fat">지방</span>
-            </div>
-            {insights.nutritionTimeBuckets.length === 0 ? (
-              <p className="time-nutrition-empty">
-                먹은 시간을 입력하면 시간대별 영양 그래프가 표시됩니다.
-              </p>
-            ) : (
-              <div
-                className="time-nutrition-chart"
-                aria-label="시간대별 하루 평균 칼로리와 탄수화물, 단백질, 지방"
-              >
-                {insights.nutritionTimeBuckets.map((item) => {
-                  const carbsCalories = item.carbs * 4;
-                  const proteinCalories = item.protein * 4;
-                  const fatCalories = item.fat * 9;
-                  const macroCalories = Math.max(
-                    carbsCalories + proteinCalories + fatCalories,
-                    1,
-                  );
-                  const title = `${String(item.hour).padStart(2, "0")}시 · ${Math.round(
-                    item.calories,
-                  )} kcal · 탄 ${item.carbs.toFixed(1)}g · 단 ${item.protein.toFixed(
-                    1,
-                  )}g · 지 ${item.fat.toFixed(1)}g`;
-                  return (
-                    <div className="time-nutrition-column" key={item.hour} title={title}>
-                      <strong>
-                        {Math.round(item.calories)}
-                        <small> kcal</small>
-                      </strong>
-                      <div className="time-bar-slot" aria-hidden="true">
-                        <div
-                          className="time-stacked-bar"
-                          style={{
-                            height: `${Math.max(
-                              8,
-                              (item.calories / maxTimeCalories) * 100,
-                            )}%`,
-                          }}
-                        >
-                          <span
-                            className="macro-fat"
-                            style={{ height: `${(fatCalories / macroCalories) * 100}%` }}
-                          />
-                          <span
-                            className="macro-protein"
-                            style={{
-                              height: `${(proteinCalories / macroCalories) * 100}%`,
-                            }}
-                          />
-                          <span
-                            className="macro-carbs"
-                            style={{
-                              height: `${(carbsCalories / macroCalories) * 100}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
-                      <span>{String(item.hour).padStart(2, "0")}시</span>
-                      <small>
-                        탄 {Math.round(item.carbs)} · 단 {Math.round(item.protein)} · 지{" "}
-                        {Math.round(item.fat)}g
-                      </small>
+            <div
+              className="time-series-charts"
+              aria-label="24시간 칼로리와 탄수화물, 단백질, 지방 그래프"
+            >
+              {timeMetrics.map((metric) => {
+                const maxValue = Math.max(
+                  1,
+                  ...insights.nutritionTimeBuckets.map(
+                    (bucket) => bucket[metric.key],
+                  ),
+                );
+                return (
+                  <section className={`time-series-row ${metric.key}`} key={metric.key}>
+                    <div className="time-series-label">
+                      <span>{metric.label}</span>
+                      <small>{metric.unit} · 하루 평균</small>
                     </div>
-                  );
-                })}
+                    <div className="time-series-bars">
+                      {insights.nutritionTimeBuckets.map((bucket) => {
+                        const value = bucket[metric.key];
+                        const label = `${String(bucket.hour).padStart(2, "0")}시 · ${
+                          value < 10 ? value.toFixed(1) : Math.round(value)
+                        }${metric.unit}`;
+                        return (
+                          <button
+                            className={value > 0 ? "has-value" : ""}
+                            key={bucket.hour}
+                            type="button"
+                            title={label}
+                            aria-label={label}
+                            onClick={() => setSelectedTimeHour(bucket.hour)}
+                          >
+                            <span
+                              style={{
+                                height: `${
+                                  value > 0
+                                    ? Math.max(6, (value / maxValue) * 100)
+                                    : 0
+                                }%`,
+                              }}
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                );
+              })}
+              <div className="time-series-axis" aria-hidden="true">
+                {Array.from({ length: 24 }, (_, hour) => (
+                  <span key={hour}>
+                    {hour % 3 === 0 || hour === 23
+                      ? String(hour).padStart(2, "0")
+                      : ""}
+                  </span>
+                ))}
+              </div>
+            </div>
+            {!hasTimedNutrition && (
+              <p className="time-series-empty">
+                먹은 시간을 입력하면 각 시간의 막대가 표시됩니다.
+              </p>
+            )}
+            {selectedTimeBucket && (
+              <div className="time-series-detail" aria-live="polite">
+                <strong>
+                  {String(selectedTimeBucket.hour).padStart(2, "0")}시
+                </strong>
+                <span>
+                  칼로리 {Math.round(selectedTimeBucket.calories)}kcal
+                </span>
+                <span>탄수화물 {selectedTimeBucket.carbs.toFixed(1)}g</span>
+                <span>단백질 {selectedTimeBucket.protein.toFixed(1)}g</span>
+                <span>지방 {selectedTimeBucket.fat.toFixed(1)}g</span>
               </div>
             )}
           </article>

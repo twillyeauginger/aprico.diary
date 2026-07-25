@@ -107,7 +107,8 @@ export function ensureSchema() {
       database.prepare(`
         CREATE TABLE IF NOT EXISTS calendar_day_types (
           day_date TEXT PRIMARY KEY,
-          day_type TEXT NOT NULL DEFAULT 'default'
+          day_type TEXT NOT NULL DEFAULT 'default',
+          is_complete INTEGER NOT NULL DEFAULT 0
         )
       `),
     ])

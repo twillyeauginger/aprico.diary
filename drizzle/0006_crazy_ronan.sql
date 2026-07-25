@@ -1,0 +1,1 @@
+ALTER TABLE `calendar_day_types` ADD `is_complete` integer DEFAULT false NOT NULL;

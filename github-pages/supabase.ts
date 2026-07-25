@@ -5,6 +5,7 @@ import {
 } from "@supabase/supabase-js";
 import type {
   AnalysisResult,
+  CalendarSettings,
   DayType,
   FoodResult,
   MealInput,
@@ -331,25 +332,36 @@ export function createSupabaseNutritionClient(
       return goals;
     },
 
-    async listDayTypes(month) {
+    async listCalendarSettings(month) {
       const { data, error } = await client
         .from("calendar_day_types")
-        .select("day_date, day_type")
+        .select("day_date, day_type, is_complete")
         .gte("day_date", `${month}-01`)
         .lt("day_date", nextMonth(month));
-      if (error) throw new Error(`날짜 유형을 불러오지 못했습니다: ${error.message}`);
-      return Object.fromEntries(
-        (data ?? []).map((row) => [row.day_date, row.day_type as DayType]),
-      );
+      if (error) throw new Error(`날짜 설정을 불러오지 못했습니다: ${error.message}`);
+      return {
+        dayTypes: Object.fromEntries(
+          (data ?? []).map((row) => [row.day_date, row.day_type as DayType]),
+        ),
+        completedDays: Object.fromEntries(
+          (data ?? []).map((row) => [row.day_date, Boolean(row.is_complete)]),
+        ),
+      } satisfies CalendarSettings;
     },
 
-    async setDayType(date, dayType) {
+    async setCalendarSettings(date, dayType, isComplete) {
       const user = await requireUser(client);
       const { error } = await client.from("calendar_day_types").upsert(
-        { user_id: user.id, day_date: date, day_type: dayType },
+        {
+          user_id: user.id,
+          day_date: date,
+          day_type: dayType,
+          is_complete: isComplete,
+          updated_at: new Date().toISOString(),
+        },
         { onConflict: "user_id,day_date" },
       );
-      if (error) throw new Error(`날짜 유형을 저장하지 못했습니다: ${error.message}`);
+      if (error) throw new Error(`날짜 설정을 저장하지 못했습니다: ${error.message}`);
     },
 
     async searchFoods(query) {

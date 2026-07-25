@@ -78,4 +78,5 @@ export const nutritionGoals = sqliteTable("nutrition_goals", {
 export const calendarDayTypes = sqliteTable("calendar_day_types", {
   dayDate: text("day_date").primaryKey(),
   dayType: text("day_type").notNull().default("default"),
+  isComplete: integer("is_complete", { mode: "boolean" }).notNull().default(false),
 });
