@@ -1301,8 +1301,10 @@ button {
 
 .modal {
   width: min(660px, 100%);
+  max-width: 100vw;
   max-height: min(800px, calc(100vh - 48px));
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 1px solid rgba(255, 255, 255, 0.58);
   border-radius: 28px;
   background: var(--paper);
@@ -1396,6 +1398,9 @@ button {
 }
 
 .tab-content {
+  width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
   padding: 22px 24px 26px;
 }
 
@@ -1606,6 +1611,10 @@ button {
   font-weight: 800;
 }
 
+.analysis-result-main {
+  min-width: 0;
+}
+
 .analysis-result-main > input {
   width: 100%;
   border: 1px solid var(--line);
@@ -1651,6 +1660,8 @@ button {
 
 .consumed-amount select,
 .consumed-amount input {
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -1857,6 +1868,7 @@ button {
 
   .modal {
     width: 100%;
+    max-width: 100%;
     max-height: 92vh;
     border-radius: 26px 26px 0 0;
   }
@@ -1893,11 +1905,24 @@ button {
   }
 
   .consumed-amount {
-    grid-template-columns: 1fr 1fr 70px 16px;
+    grid-template-columns: minmax(0, 1fr) 88px 18px;
   }
 
   .consumed-amount label {
     grid-column: 1 / -1;
+  }
+
+  .consumed-amount select,
+  .consumed-amount input,
+  .analysis-db-select,
+  .analysis-result-main > input {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .consumed-amount input {
+    padding-inline: 6px;
+    text-align: right;
   }
 
   .bulk-apply-prompt {

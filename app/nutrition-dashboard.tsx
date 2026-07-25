@@ -507,6 +507,9 @@ export function NutritionDashboard({
   );
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [originalAnalysisItems, setOriginalAnalysisItems] = useState<
+    AnalysisItem[]
+  >([]);
   const [analysisDrafts, setAnalysisDrafts] = useState<AnalysisDraft[]>([]);
   const [bulkPercentPrompt, setBulkPercentPrompt] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<
@@ -724,6 +727,7 @@ export function NutritionDashboard({
   function closeModal() {
     setModalOpen(false);
     setAnalysis(null);
+    setOriginalAnalysisItems([]);
     setAnalysisDrafts([]);
     setBulkPercentPrompt(null);
     setPhotoFile(null);
@@ -967,6 +971,7 @@ export function NutritionDashboard({
     setPhotoFile(file);
     setPhotoPreview(URL.createObjectURL(file));
     setAnalysis(null);
+    setOriginalAnalysisItems([]);
     setAnalysisDrafts([]);
     setBulkPercentPrompt(null);
     setPhotoDate(selectedDate);
@@ -999,6 +1004,7 @@ export function NutritionDashboard({
     try {
       const result = await client.analyzePhoto(photoFile);
       setAnalysis(result);
+      setOriginalAnalysisItems(result.items);
       setAnalysisDrafts(
         result.items.map((item) => ({
           name: item.name,
@@ -1018,6 +1024,28 @@ export function NutritionDashboard({
   }
 
   function replaceAnalysisItemFromDb(index: number, foodId: string) {
+    if (!foodId) {
+      const original = originalAnalysisItems[index];
+      if (!original) return;
+      setAnalysis((current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((item, itemIndex) =>
+                itemIndex === index ? original : item,
+              ),
+            }
+          : current,
+      );
+      setAnalysisDrafts((current) =>
+        current.map((draft, draftIndex) =>
+          draftIndex === index
+            ? { ...draft, name: original.name, savedFoodId: undefined }
+            : draft,
+        ),
+      );
+      return;
+    }
     const food = savedFoods.find((item) => String(item.id) === foodId);
     if (!food) return;
     setAnalysis((current) =>
@@ -1856,6 +1884,7 @@ export function NutritionDashboard({
                                   min="0"
                                   type="number"
                                   value={analysisDrafts[index]?.amount ?? "100"}
+                                  onFocus={(event) => event.currentTarget.select()}
                                   onChange={(event) =>
                                     {
                                       const value = event.target.value;
@@ -1881,6 +1910,38 @@ export function NutritionDashboard({
                                   {analysisDrafts[index]?.amountMode === "grams" ? "g" : "%"}
                                 </span>
                               </div>
+                              {index === 0 &&
+                                bulkPercentPrompt !== null &&
+                                analysis.items.length > 1 && (
+                                  <div className="bulk-apply-prompt" role="status">
+                                    <span>
+                                      나머지 음식에도 {bulkPercentPrompt}%를 적용할까요?
+                                    </span>
+                                    <div>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setAnalysisDrafts((current) =>
+                                            current.map((draft) => ({
+                                              ...draft,
+                                              amountMode: "percent",
+                                              amount: bulkPercentPrompt,
+                                            })),
+                                          );
+                                          setBulkPercentPrompt(null);
+                                        }}
+                                      >
+                                        모두 적용
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setBulkPercentPrompt(null)}
+                                      >
+                                        개별 입력
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
                             </div>
                             <span className="confidence">
                               신뢰도 {Math.round(item.confidence * 100)}%
@@ -1888,36 +1949,6 @@ export function NutritionDashboard({
                           </div>
                         ))}
                       </div>
-                      {bulkPercentPrompt !== null && analysis.items.length > 1 && (
-                        <div className="bulk-apply-prompt" role="status">
-                          <span>
-                            모든 음식에 {bulkPercentPrompt}%를 똑같이 적용할까요?
-                          </span>
-                          <div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setAnalysisDrafts((current) =>
-                                  current.map((draft) => ({
-                                    ...draft,
-                                    amountMode: "percent",
-                                    amount: bulkPercentPrompt,
-                                  })),
-                                );
-                                setBulkPercentPrompt(null);
-                              }}
-                            >
-                              모두 적용
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setBulkPercentPrompt(null)}
-                            >
-                              개별 입력
-                            </button>
-                          </div>
-                        </div>
-                      )}
                       <button
                         className="primary-button wide-button"
                         type="button"
