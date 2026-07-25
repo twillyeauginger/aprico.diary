@@ -412,7 +412,7 @@ button {
 .day-goal-grid {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   align-items: stretch;
 }
@@ -430,10 +430,6 @@ button {
 
 .day-goal-card.exercise {
   border-top-color: #3b82f6;
-}
-
-.day-goal-card.rest {
-  border-top-color: #f4c430;
 }
 
 .day-goal-card header {
@@ -985,6 +981,38 @@ button {
   margin-bottom: 6px;
 }
 
+.insight-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.insight-period-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-radius: 999px;
+  background: var(--paper-deep);
+  padding: 4px;
+}
+
+.insight-period-tabs button {
+  min-width: 42px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.insight-period-tabs button.active {
+  background: var(--white);
+  color: var(--ink);
+  box-shadow: 0 3px 12px rgba(37, 48, 43, 0.1);
+}
+
 .insights-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1167,6 +1195,17 @@ button {
   color: var(--muted);
   font-size: 9px;
   text-align: center;
+}
+
+.goal-heatmap.period-day {
+  width: min(100%, 180px);
+  grid-template-columns: 1fr;
+}
+
+.goal-heatmap.period-day .goal-day {
+  aspect-ratio: auto;
+  min-height: 70px;
+  font-size: 16px;
 }
 
 .goal-day,
@@ -1622,11 +1661,6 @@ button {
 .day-type-badge.exercise {
   background: #dbeafe;
   color: #1d4ed8;
-}
-
-.day-type-badge.rest {
-  background: #fef3c7;
-  color: #8a6500;
 }
 
 .day-complete-mark {
@@ -2641,6 +2675,19 @@ button {
 
   .goal-heatmap-heading {
     flex-direction: column;
+  }
+
+  .insights-panel > .panel-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .insight-controls {
+    justify-content: space-between;
+  }
+
+  .insight-period-tabs {
+    flex: 1;
   }
 
   .goal-heatmap-summary {

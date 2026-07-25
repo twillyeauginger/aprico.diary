@@ -6,7 +6,6 @@ import {
 import type {
   AnalysisResult,
   CalendarSettings,
-  DayType,
   FoodResult,
   MealInput,
   MealRecord,
@@ -341,7 +340,10 @@ export function createSupabaseNutritionClient(
       if (error) throw new Error(`날짜 설정을 불러오지 못했습니다: ${error.message}`);
       return {
         dayTypes: Object.fromEntries(
-          (data ?? []).map((row) => [row.day_date, row.day_type as DayType]),
+          (data ?? []).map((row) => [
+            row.day_date,
+            row.day_type === "exercise" ? "exercise" : "default",
+          ]),
         ),
         completedDays: Object.fromEntries(
           (data ?? []).map((row) => [row.day_date, Boolean(row.is_complete)]),

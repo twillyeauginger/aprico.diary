@@ -7,7 +7,9 @@
 ## 주요 기능
 
 - 월간 캘린더와 날짜별 식단 기록
+- 캘린더의 `운동 하는 날`·`운동 없는 날` 설정과 날짜별 영양 목표
 - 칼로리, 탄수화물, 단백질, 지방 요약
+- 일·주·월 인사이트와 24시간대별 독립 영양 그래프
 - 음식 직접 입력 및 식품 데이터 검색
 - 음식·영양정보 사진 업로드
 - OpenAI 이미지 분석 결과 확인 후 저장
@@ -51,7 +53,8 @@ pnpm run preview:pages
 Edge Function 비밀값은 Supabase에만 설정합니다.
 
 - `OPENAI_API_KEY`: 음식 사진 분석
-- `OPENAI_MODEL`: 이미지 분석 모델, 기본값 `gpt-5.6-sol`
+- `OPENAI_MODEL`: 이미지 분석 모델, 기본값 `gpt-5.6-sol` (사진 분석은
+  원본 해상도와 medium 추론 강도 사용)
 - `FOOD_DB_API_KEY`: 식약처 식품영양성분 DB 검색
 - `APP_ORIGIN`: 기본 허용 주소, `https://twillyeauginger.github.io`
 - `APP_ORIGINS`: 추가 허용 주소를 쉼표로 구분

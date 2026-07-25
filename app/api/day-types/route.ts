@@ -11,7 +11,12 @@ export async function GET(request: Request) {
     .bind(`${month}%`)
     .all<{ day_date: string; day_type: DayType; is_complete: number }>();
   return Response.json({
-    dayTypes: Object.fromEntries(rows.results.map((row) => [row.day_date, row.day_type])),
+    dayTypes: Object.fromEntries(
+      rows.results.map((row) => [
+        row.day_date,
+        row.day_type === "exercise" ? "exercise" : "default",
+      ]),
+    ),
     completedDays: Object.fromEntries(
       rows.results.map((row) => [row.day_date, Boolean(row.is_complete)]),
     ),
@@ -26,7 +31,7 @@ export async function PUT(request: Request) {
     isComplete?: boolean;
   };
   if (!body.date?.match(/^\d{4}-\d{2}-\d{2}$/) ||
-      !["default", "exercise", "rest"].includes(body.dayType ?? "") ||
+      !["default", "exercise"].includes(body.dayType ?? "") ||
       typeof body.isComplete !== "boolean") {
     return Response.json({ error: "날짜 또는 날짜 유형이 올바르지 않습니다." }, { status: 400 });
   }

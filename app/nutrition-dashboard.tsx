@@ -101,7 +101,8 @@ export type SavedFood = {
 };
 
 export type SavedFoodInput = Omit<SavedFood, "id">;
-export type DayType = "default" | "exercise" | "rest";
+export type DayType = "default" | "exercise";
+type InsightPeriod = "day" | "week" | "month";
 export type CalendarSettings = {
   dayTypes: Record<string, DayType>;
   completedDays: Record<string, boolean>;
@@ -268,7 +269,16 @@ const legacyNutritionClient: NutritionClient = {
   async listCalendarSettings(month) {
     const response = await fetch(`/api/day-types?month=${month}`);
     if (!response.ok) return { dayTypes: {}, completedDays: {} };
-    return (await response.json()) as CalendarSettings;
+    const settings = (await response.json()) as CalendarSettings;
+    return {
+      dayTypes: Object.fromEntries(
+        Object.entries(settings.dayTypes).map(([date, value]) => [
+          date,
+          normalizeDayType(value),
+        ]),
+      ),
+      completedDays: settings.completedDays,
+    };
   },
   async setCalendarSettings(date, dayType, isComplete) {
     const response = await fetch("/api/day-types", {
@@ -543,6 +553,10 @@ function displayDate(key: string) {
   }).format(date);
 }
 
+function normalizeDayType(value: unknown): DayType {
+  return value === "exercise" ? "exercise" : "default";
+}
+
 function goalsForDay(goals: NutritionGoals, dayType: DayType) {
   if (dayType === "exercise") {
     return {
@@ -551,15 +565,6 @@ function goalsForDay(goals: NutritionGoals, dayType: DayType) {
       carbs: Math.round((goals.exerciseCarbsMin + goals.exerciseCarbsMax) / 2),
       protein: Math.round((goals.exerciseProteinMin + goals.exerciseProteinMax) / 2),
       fat: goals.exerciseFat,
-    };
-  }
-  if (dayType === "rest") {
-    return {
-      ...goals,
-      calories: goals.restCalories,
-      carbs: Math.round((goals.restCarbsMin + goals.restCarbsMax) / 2),
-      protein: goals.restProtein,
-      fat: goals.restFat,
     };
   }
   return goals;
@@ -616,30 +621,6 @@ function adherenceRanges(
       },
     };
   }
-  if (dayType === "rest") {
-    return {
-      calories: {
-        min: goals.restCalories * 0.9,
-        max: goals.restCalories * 1.1,
-        target: goals.restCalories,
-      },
-      carbs: {
-        min: goals.restCarbsMin,
-        max: goals.restCarbsMax,
-        target: (goals.restCarbsMin + goals.restCarbsMax) / 2,
-      },
-      protein: {
-        min: goals.restProtein * 0.85,
-        max: goals.restProtein * 1.15,
-        target: goals.restProtein,
-      },
-      fat: {
-        min: goals.restFat * 0.85,
-        max: goals.restFat * 1.15,
-        target: goals.restFat,
-      },
-    };
-  }
   return {
     calories: {
       min: goals.calories * 0.9,
@@ -680,14 +661,6 @@ function configuredGoalLabel(
       return `${goals.exerciseProteinMin}–${goals.exerciseProteinMax}`;
     }
     return goals.exerciseFat.toLocaleString();
-  }
-  if (dayType === "rest") {
-    if (metric === "calories") return goals.restCalories.toLocaleString();
-    if (metric === "carbs") {
-      return `${goals.restCarbsMin}–${goals.restCarbsMax}`;
-    }
-    if (metric === "protein") return goals.restProtein.toLocaleString();
-    return goals.restFat.toLocaleString();
   }
   return goals[metric].toLocaleString();
 }
@@ -775,6 +748,154 @@ function evaluateAdherence({
   };
 }
 
+function dateFromKey(key: string) {
+  return new Date(`${key}T12:00:00`);
+}
+
+function insightDateRange(period: InsightPeriod, anchor: Date) {
+  const start = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate(), 12);
+  const end = new Date(start);
+  if (period === "week") {
+    start.setDate(start.getDate() - start.getDay());
+    end.setTime(start.getTime());
+    end.setDate(end.getDate() + 6);
+  } else if (period === "month") {
+    start.setDate(1);
+    end.setFullYear(start.getFullYear(), start.getMonth() + 1, 0);
+  }
+  return { start, end };
+}
+
+function datesInRange(start: Date, end: Date) {
+  const dates: string[] = [];
+  const cursor = new Date(start);
+  while (cursor <= end) {
+    dates.push(dateKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+}
+
+function insightRangeLabel(period: InsightPeriod, start: Date, end: Date) {
+  if (period === "day") {
+    return new Intl.DateTimeFormat("ko-KR", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      weekday: "short",
+    }).format(start);
+  }
+  if (period === "month") {
+    return `${start.getFullYear()}년 ${start.getMonth() + 1}월`;
+  }
+  const sameMonth = start.getMonth() === end.getMonth();
+  const startLabel = `${start.getMonth() + 1}월 ${start.getDate()}일`;
+  const endLabel = sameMonth
+    ? `${end.getDate()}일`
+    : `${end.getMonth() + 1}월 ${end.getDate()}일`;
+  return `${start.getFullYear()}년 ${startLabel}–${endLabel}`;
+}
+
+function buildPeriodInsights(
+  rows: MealRecord[],
+  period: InsightPeriod,
+  start: Date,
+  end: Date,
+  completedDays: Record<string, boolean>,
+) {
+  const startKey = dateKey(start);
+  const endKey = dateKey(end);
+  const rangeDates = datesInRange(start, end);
+  const actualMeals = rows.filter(
+    (meal) =>
+      !meal.demo && meal.mealDate >= startKey && meal.mealDate <= endKey,
+  );
+  const mealsByDate = new Map<string, MealRecord[]>();
+  for (const meal of actualMeals) {
+    const dailyRows = mealsByDate.get(meal.mealDate) ?? [];
+    dailyRows.push(meal);
+    mealsByDate.set(meal.mealDate, dailyRows);
+  }
+  const recordedDates = rangeDates.filter((date) => mealsByDate.has(date));
+  const completedRecordedDates = recordedDates.filter(
+    (date) => completedDays[date],
+  );
+  const basisDates =
+    period === "day"
+      ? recordedDates
+      : completedRecordedDates.length > 0
+        ? completedRecordedDates
+        : recordedDates;
+  const basisDateSet = new Set(basisDates);
+  const basisMeals =
+    period === "day"
+      ? actualMeals
+      : actualMeals.filter((meal) => basisDateSet.has(meal.mealDate));
+  const divisor = period === "day" ? 1 : Math.max(basisDates.length, 1);
+  const totals = sumNutrition(basisMeals);
+  const averageValues = {
+    calories: totals.calories / divisor,
+    carbs: totals.carbs / divisor,
+    protein: totals.protein / divisor,
+    fat: totals.fat / divisor,
+  };
+  const dailyTotals = rangeDates.map((date) => ({
+    date,
+    ...sumNutrition(mealsByDate.get(date) ?? []),
+  }));
+  const occasions = groupMealOccasions(basisMeals);
+  const mealTypes = ["아침", "점심", "저녁", "간식"].map((type) => ({
+    type,
+    count: occasions.filter((occasion) => occasion.mealType === type).length,
+  }));
+  const timeBuckets = new Map<number, ReturnType<typeof sumNutrition>>();
+  for (const occasion of occasions) {
+    const hour = Number(occasion.mealTime?.slice(0, 2));
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23) continue;
+    const current = timeBuckets.get(hour) ?? {
+      calories: 0,
+      carbs: 0,
+      protein: 0,
+      fat: 0,
+    };
+    timeBuckets.set(hour, {
+      calories: current.calories + occasion.calories,
+      carbs: current.carbs + occasion.carbs,
+      protein: current.protein + occasion.protein,
+      fat: current.fat + occasion.fat,
+    });
+  }
+  const nutritionTimeBuckets = Array.from({ length: 24 }, (_, hour) => {
+    const total = timeBuckets.get(hour) ?? {
+      calories: 0,
+      carbs: 0,
+      protein: 0,
+      fat: 0,
+    };
+    return {
+      hour,
+      calories: total.calories / divisor,
+      carbs: total.carbs / divisor,
+      protein: total.protein / divisor,
+      fat: total.fat / divisor,
+    };
+  });
+  return {
+    dayCount: recordedDates.length,
+    recordedDates,
+    basisDayCount: basisDates.length,
+    basisDates,
+    usesCompletedBasis:
+      period !== "day" && completedRecordedDates.length > 0,
+    rangeDates,
+    dailyTotals,
+    totals,
+    averageValues,
+    mealTypes,
+    nutritionTimeBuckets,
+  };
+}
+
 export function NutritionDashboard({
   client = legacyNutritionClient,
   userEmail,
@@ -789,6 +910,11 @@ export function NutritionDashboard({
     new Date(today.getFullYear(), today.getMonth(), 1),
   );
   const [selectedDate, setSelectedDate] = useState(dateKey(today));
+  const [insightPeriod, setInsightPeriod] =
+    useState<InsightPeriod>("week");
+  const [insightAnchor, setInsightAnchor] = useState(
+    new Date(today.getFullYear(), today.getMonth(), today.getDate(), 12),
+  );
   const [activeView, setActiveView] = useState<
     "calendar" | "foods" | "foodDb" | "insights" | "profile"
   >("calendar");
@@ -904,7 +1030,7 @@ export function NutritionDashboard({
   }, [client, viewMonth, today]);
 
   useEffect(() => {
-    if (activeView !== "foods") return;
+    if (activeView !== "foods" && activeView !== "insights") return;
     let cancelled = false;
     client
       .listAllMeals()
@@ -921,12 +1047,45 @@ export function NutritionDashboard({
         }
       })
       .finally(() => {
-        if (!cancelled) setFoodListLoading(false);
+        if (!cancelled && activeView === "foods") setFoodListLoading(false);
       });
     return () => {
       cancelled = true;
     };
   }, [activeView, client]);
+
+  const insightRange = useMemo(
+    () => insightDateRange(insightPeriod, insightAnchor),
+    [insightAnchor, insightPeriod],
+  );
+
+  useEffect(() => {
+    if (activeView !== "insights") return;
+    let cancelled = false;
+    const months = [
+      monthKey(insightRange.start),
+      monthKey(insightRange.end),
+    ].filter((month, index, values) => values.indexOf(month) === index);
+    Promise.all(months.map((month) => client.listCalendarSettings(month)))
+      .then((settingsList) => {
+        if (cancelled) return;
+        setDayTypes((current) => ({
+          ...current,
+          ...Object.assign({}, ...settingsList.map((settings) => settings.dayTypes)),
+        }));
+        setCompletedDays((current) => ({
+          ...current,
+          ...Object.assign(
+            {},
+            ...settingsList.map((settings) => settings.completedDays),
+          ),
+        }));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView, client, insightRange.end, insightRange.start]);
 
   useEffect(() => {
     if (activeView !== "foodDb" && !modalOpen) return;
@@ -995,64 +1154,47 @@ export function NutritionDashboard({
     return map;
   }, [meals]);
 
-  const monthInsights = useMemo(() => {
-    const actualMeals = meals.filter((meal) => !meal.demo);
-    const occasions = groupMealOccasions(actualMeals);
-    const days = new Map<string, MealRecord[]>();
-    for (const meal of actualMeals) {
-      const rows = days.get(meal.mealDate) ?? [];
-      rows.push(meal);
-      days.set(meal.mealDate, rows);
-    }
-    const dailyTotals = [...days.entries()]
-      .map(([date, rows]) => ({ date, ...sumNutrition(rows) }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-    const totals = sumNutrition(actualMeals);
-    const dayCount = days.size;
-    const mealTypes = ["아침", "점심", "저녁", "간식"].map((type) => ({
-      type,
-      count: occasions.filter((occasion) => occasion.mealType === type).length,
-    }));
-    const timeBuckets = new Map<number, ReturnType<typeof sumNutrition>>();
-    for (const occasion of occasions) {
-      const hour = Number(occasion.mealTime?.slice(0, 2));
-      if (!Number.isInteger(hour) || hour < 0 || hour > 23) continue;
-      const current = timeBuckets.get(hour) ?? {
-        calories: 0,
-        carbs: 0,
-        protein: 0,
-        fat: 0,
-      };
-      timeBuckets.set(hour, {
-        calories: current.calories + occasion.calories,
-        carbs: current.carbs + occasion.carbs,
-        protein: current.protein + occasion.protein,
-        fat: current.fat + occasion.fat,
-      });
-    }
-    const nutritionTimeBuckets = Array.from({ length: 24 }, (_, hour) => {
-      const total = timeBuckets.get(hour) ?? {
-        calories: 0,
-        carbs: 0,
-        protein: 0,
-        fat: 0,
-      };
-      return {
-        hour,
-        calories: total.calories / Math.max(dayCount, 1),
-        carbs: total.carbs / Math.max(dayCount, 1),
-        protein: total.protein / Math.max(dayCount, 1),
-        fat: total.fat / Math.max(dayCount, 1),
-      };
-    });
+  const periodInsights = useMemo(
+    () =>
+      buildPeriodInsights(
+        allMeals.length > 0 ? allMeals : meals,
+        insightPeriod,
+        insightRange.start,
+        insightRange.end,
+        completedDays,
+      ),
+    [
+      allMeals,
+      completedDays,
+      insightPeriod,
+      insightRange.end,
+      insightRange.start,
+      meals,
+    ],
+  );
+  const insightGoals = useMemo(() => {
+    const dates =
+      periodInsights.basisDates.length > 0
+        ? periodInsights.basisDates
+        : [dateKey(insightAnchor)];
+    const dailyGoals = dates.map((date) =>
+      goalsForDay(nutritionGoals, dayTypes[date] ?? "default"),
+    );
     return {
-      dayCount,
-      dailyTotals,
-      totals,
-      mealTypes,
-      nutritionTimeBuckets,
+      calories:
+        dailyGoals.reduce((sum, goal) => sum + goal.calories, 0) /
+        dailyGoals.length,
+      carbs:
+        dailyGoals.reduce((sum, goal) => sum + goal.carbs, 0) /
+        dailyGoals.length,
+      protein:
+        dailyGoals.reduce((sum, goal) => sum + goal.protein, 0) /
+        dailyGoals.length,
+      fat:
+        dailyGoals.reduce((sum, goal) => sum + goal.fat, 0) /
+        dailyGoals.length,
     };
-  }, [meals]);
+  }, [dayTypes, insightAnchor, nutritionGoals, periodInsights.basisDates]);
 
   const filteredAllMeals = useMemo(() => {
     const normalized = foodListQuery.trim().toLocaleLowerCase("ko");
@@ -1560,6 +1702,20 @@ export function NutritionDashboard({
     );
   }
 
+  function changeInsightRange(offset: number) {
+    setInsightAnchor((current) => {
+      const next = new Date(current);
+      if (insightPeriod === "day") {
+        next.setDate(next.getDate() + offset);
+      } else if (insightPeriod === "week") {
+        next.setDate(next.getDate() + offset * 7);
+      } else {
+        next.setMonth(next.getMonth() + offset);
+      }
+      return next;
+    });
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -1597,7 +1753,10 @@ export function NutritionDashboard({
           <button
             className={activeView === "insights" ? "active" : ""}
             type="button"
-            onClick={() => setActiveView("insights")}
+            onClick={() => {
+              setInsightAnchor(dateFromKey(selectedDate));
+              setActiveView("insights");
+            }}
           >
             인사이트
           </button>
@@ -1671,17 +1830,27 @@ export function NutritionDashboard({
 
       {(activeView === "calendar" || activeView === "insights") && <section
         className="summary-grid"
-        aria-label={activeView === "calendar" ? "선택한 날짜 영양 요약" : "월간 영양 요약"}
+        aria-label={activeView === "calendar" ? "선택한 날짜 영양 요약" : "기간 영양 요약"}
       >
         <SummaryCard
-          label={activeView === "calendar" ? "오늘의 에너지" : "하루 평균 에너지"}
+          label={
+            activeView === "calendar"
+              ? "오늘의 에너지"
+              : insightPeriod === "day"
+                ? "이날의 에너지"
+                : "하루 평균 에너지"
+          }
           value={Math.round(
             activeView === "calendar"
               ? selectedTotals.calories
-              : monthInsights.totals.calories / Math.max(monthInsights.dayCount, 1),
+              : periodInsights.averageValues.calories,
           )}
           unit="kcal"
-          goal={activeView === "calendar" ? selectedGoals.calories : nutritionGoals.calories}
+          goal={Math.round(
+            activeView === "calendar"
+              ? selectedGoals.calories
+              : insightGoals.calories,
+          )}
           primary
         />
         <SummaryCard
@@ -1689,30 +1858,38 @@ export function NutritionDashboard({
           value={Math.round(
             activeView === "calendar"
               ? selectedTotals.carbs
-              : monthInsights.totals.carbs / Math.max(monthInsights.dayCount, 1),
+              : periodInsights.averageValues.carbs,
           )}
           unit="g"
-          goal={activeView === "calendar" ? selectedGoals.carbs : nutritionGoals.carbs}
+          goal={Math.round(
+            activeView === "calendar" ? selectedGoals.carbs : insightGoals.carbs,
+          )}
         />
         <SummaryCard
           label="단백질"
           value={Math.round(
             activeView === "calendar"
               ? selectedTotals.protein
-              : monthInsights.totals.protein / Math.max(monthInsights.dayCount, 1),
+              : periodInsights.averageValues.protein,
           )}
           unit="g"
-          goal={activeView === "calendar" ? selectedGoals.protein : nutritionGoals.protein}
+          goal={Math.round(
+            activeView === "calendar"
+              ? selectedGoals.protein
+              : insightGoals.protein,
+          )}
         />
         <SummaryCard
           label="지방"
           value={Math.round(
             activeView === "calendar"
               ? selectedTotals.fat
-              : monthInsights.totals.fat / Math.max(monthInsights.dayCount, 1),
+              : periodInsights.averageValues.fat,
           )}
           unit="g"
-          goal={activeView === "calendar" ? selectedGoals.fat : nutritionGoals.fat}
+          goal={Math.round(
+            activeView === "calendar" ? selectedGoals.fat : insightGoals.fat,
+          )}
         />
       </section>}
 
@@ -1793,7 +1970,7 @@ export function NutritionDashboard({
                   <span className="day-number">{date.getDate()}</span>
                   {dayTypes[key] && dayTypes[key] !== "default" && (
                     <span className={`day-type-badge ${dayTypes[key]}`}>
-                      {dayTypes[key] === "exercise" ? "운동" : "휴식"}
+                      운동
                     </span>
                   )}
                   {completedDays[key] && (
@@ -1822,9 +1999,8 @@ export function NutritionDashboard({
           </div>
           <div className="day-type-selector" aria-label="선택한 날짜 유형">
             {([
-              ["default", "기본일"],
-              ["exercise", "운동일"],
-              ["rest", "휴식일"],
+              ["default", "운동 없는 날"],
+              ["exercise", "운동 하는 날"],
             ] as Array<[DayType, string]>).map(([value, label]) => (
               <button
                 className={(dayTypes[selectedDate] ?? "default") === value ? "active" : ""}
@@ -1881,7 +2057,7 @@ export function NutritionDashboard({
             <span aria-hidden="true">{completedDays[selectedDate] ? "✓" : "○"}</span>
             <span>
               <strong>이날 기록 완료</strong>
-              <small>완료한 날만 월간 목표 달성 분석에 포함됩니다.</small>
+              <small>완료한 날은 일·주·월 목표 달성 분석에 우선 반영됩니다.</small>
             </span>
           </button>
         </div>
@@ -1982,12 +2158,15 @@ export function NutritionDashboard({
       </section>
       ) : activeView === "insights" ? (
         <InsightsPanel
-          month={viewMonth}
-          insights={monthInsights}
+          period={insightPeriod}
+          start={insightRange.start}
+          end={insightRange.end}
+          insights={periodInsights}
           dayTypes={dayTypes}
           completedDays={completedDays}
           goals={nutritionGoals}
-          onChangeMonth={changeMonth}
+          onChangePeriod={setInsightPeriod}
+          onChangeRange={changeInsightRange}
         />
       ) : activeView === "foods" ? (
         <FoodListPanel
@@ -3166,15 +3345,15 @@ function ProfilePanel({
       >
         <h3 className="goal-section-title">나의 영양 목표</h3>
         <p className="goal-section-description">
-          캘린더에서 날짜 유형을 선택하면 해당 목표가 식단 진행률에 적용됩니다.
+          캘린더에서 운동 여부를 선택하면 해당 목표가 식단 진행률에 적용됩니다.
         </p>
         <div className="day-goal-grid">
           {([
             {
               key: "default",
-              title: "기본일",
+              title: "운동 없는 날",
               description:
-                "특별한 운동이나 완전한 휴식이 아닌, 평소 생활 패턴을 보내는 날입니다.",
+                "계획한 운동을 하지 않는 날입니다. 일상 활동을 기준으로 한 기본 목표를 사용합니다.",
               fields: [
                 ["calories", "칼로리", "kcal"],
                 ["carbs", "탄수화물", "g"],
@@ -3184,7 +3363,7 @@ function ProfilePanel({
             },
             {
               key: "exercise",
-              title: "운동일",
+              title: "운동 하는 날",
               description:
                 "근력·유산소 등 계획한 운동을 한 날입니다. 활동량에 맞춰 에너지와 탄수화물 범위를 높입니다.",
               fields: [
@@ -3195,19 +3374,6 @@ function ProfilePanel({
                 ["exerciseProteinMin", "단백질 최소", "g"],
                 ["exerciseProteinMax", "단백질 최대", "g"],
                 ["exerciseFat", "지방", "g"],
-              ],
-            },
-            {
-              key: "rest",
-              title: "휴식일",
-              description:
-                "계획한 운동 없이 회복에 집중하는 날입니다. 단백질·지방은 유지하고 에너지와 탄수화물은 낮춥니다.",
-              fields: [
-                ["restCalories", "칼로리", "kcal"],
-                ["restCarbsMin", "탄수화물 최소", "g"],
-                ["restCarbsMax", "탄수화물 최대", "g"],
-                ["restProtein", "단백질", "g"],
-                ["restFat", "지방", "g"],
               ],
             },
           ] as Array<{
@@ -3366,38 +3532,30 @@ function SavedFoodPanel({
 }
 
 function InsightsPanel({
-  month,
+  period,
+  start,
+  end,
   insights,
   dayTypes,
   completedDays,
   goals,
-  onChangeMonth,
+  onChangePeriod,
+  onChangeRange,
 }: {
-  month: Date;
-  insights: {
-    dayCount: number;
-    dailyTotals: Array<ReturnType<typeof sumNutrition> & { date: string }>;
-    totals: ReturnType<typeof sumNutrition>;
-    mealTypes: Array<{ type: string; count: number }>;
-    nutritionTimeBuckets: Array<{
-      hour: number;
-      calories: number;
-      carbs: number;
-      protein: number;
-      fat: number;
-    }>;
-  };
+  period: InsightPeriod;
+  start: Date;
+  end: Date;
+  insights: ReturnType<typeof buildPeriodInsights>;
   dayTypes: Record<string, DayType>;
   completedDays: Record<string, boolean>;
   goals: NutritionGoals;
-  onChangeMonth: (offset: number) => void;
+  onChangePeriod: (period: InsightPeriod) => void;
+  onChangeRange: (offset: number) => void;
 }) {
   const [selectedHeatmapDate, setSelectedHeatmapDate] = useState<string | null>(
     null,
   );
   const [selectedTimeHour, setSelectedTimeHour] = useState<number | null>(null);
-  const averageCalories =
-    insights.totals.calories / Math.max(insights.dayCount, 1);
   const maxCalories = Math.max(
     2000,
     ...insights.dailyTotals.map((day) => day.calories),
@@ -3410,16 +3568,12 @@ function InsightsPanel({
     () => new Map(insights.dailyTotals.map((day) => [day.date, day])),
     [insights.dailyTotals],
   );
+  const recordedDateSet = useMemo(
+    () => new Set(insights.recordedDates),
+    [insights.recordedDates],
+  );
   const adherenceDays = useMemo(() => {
-    const daysInMonth = new Date(
-      month.getFullYear(),
-      month.getMonth() + 1,
-      0,
-    ).getDate();
-    return Array.from({ length: daysInMonth }, (_, index) => {
-      const date = dateKey(
-        new Date(month.getFullYear(), month.getMonth(), index + 1),
-      );
+    return insights.rangeDates.map((date) => {
       const values = dailyTotalsByDate.get(date) ?? {
         calories: 0,
         carbs: 0,
@@ -3432,10 +3586,17 @@ function InsightsPanel({
         goals,
         dayType: dayTypes[date] ?? "default",
         isComplete: completedDays[date] ?? false,
-        hasRecords: dailyTotalsByDate.has(date),
+        hasRecords: recordedDateSet.has(date),
       });
     });
-  }, [completedDays, dailyTotalsByDate, dayTypes, goals, month]);
+  }, [
+    completedDays,
+    dailyTotalsByDate,
+    dayTypes,
+    goals,
+    insights.rangeDates,
+    recordedDateSet,
+  ]);
   const completedAdherenceDays = adherenceDays.filter(
     (day) => day.status === "close" || day.status === "off",
   );
@@ -3465,11 +3626,7 @@ function InsightsPanel({
   })();
   const selectedAdherence =
     adherenceDays.find((day) => day.date === selectedHeatmapDate) ?? null;
-  const heatmapLeadingCells = new Date(
-    month.getFullYear(),
-    month.getMonth(),
-    1,
-  ).getDay();
+  const heatmapLeadingCells = period === "month" ? start.getDay() : 0;
   const timeMetrics: Array<{
     key: AdherenceMetric;
     label: string;
@@ -3486,36 +3643,60 @@ function InsightsPanel({
       bucket.protein > 0 ||
       bucket.fat > 0,
   );
+  const periodName =
+    period === "day" ? "일간" : period === "week" ? "주간" : "월간";
+  const averageCaption =
+    period === "day"
+      ? "선택한 날의 실제 섭취량"
+      : `${
+          insights.usesCompletedBasis ? "기록 완료일" : "기록이 있는 날"
+        } ${insights.basisDayCount}일 기준 하루 평균`;
 
   return (
     <section className="insights-panel" aria-labelledby="insights-title">
       <div className="panel-header">
         <div>
-          <p className="eyebrow">월간 인사이트</p>
-          <h2 id="insights-title">
-            {month.getFullYear()}년 {month.getMonth() + 1}월 기록
-          </h2>
+          <p className="eyebrow">{periodName} 인사이트</p>
+          <h2 id="insights-title">{insightRangeLabel(period, start, end)}</h2>
           <p className="date-kicker">
-            기록한 날짜를 기준으로 하루 평균을 계산합니다.
+            {averageCaption}
           </p>
         </div>
-        <div className="month-controls">
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="이전 달"
-            onClick={() => onChangeMonth(-1)}
-          >
-            ←
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="다음 달"
-            onClick={() => onChangeMonth(1)}
-          >
-            →
-          </button>
+        <div className="insight-controls">
+          <div className="insight-period-tabs" aria-label="인사이트 기간">
+            {([
+              ["day", "일"],
+              ["week", "주"],
+              ["month", "월"],
+            ] as Array<[InsightPeriod, string]>).map(([value, label]) => (
+              <button
+                className={period === value ? "active" : ""}
+                key={value}
+                type="button"
+                onClick={() => onChangePeriod(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="month-controls">
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={`이전 ${periodName}`}
+              onClick={() => onChangeRange(-1)}
+            >
+              ←
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={`다음 ${periodName}`}
+              onClick={() => onChangeRange(1)}
+            >
+              →
+            </button>
+          </div>
         </div>
       </div>
 
@@ -3531,21 +3712,26 @@ function InsightsPanel({
           <article className="insight-card">
             <span className="insight-label">기록한 날</span>
             <strong>{insights.dayCount}<small>일</small></strong>
-            <p>같은 사진과 같은 시간의 음식을 묶어 총 {totalMeals}끼</p>
+            <p>같은 사진과 같은 시간을 한 끼로 묶어 총 {totalMeals}끼</p>
           </article>
           <article className="insight-card">
-            <span className="insight-label">하루 평균 열량</span>
-            <strong>{Math.round(averageCalories).toLocaleString()}<small>kcal</small></strong>
-            <p>기록이 있는 날짜 기준</p>
+            <span className="insight-label">
+              {period === "day" ? "이날 섭취 열량" : "하루 평균 열량"}
+            </span>
+            <strong>
+              {Math.round(insights.averageValues.calories).toLocaleString()}
+              <small>kcal</small>
+            </strong>
+            <p>{averageCaption}</p>
           </article>
           <article className="insight-card goal-heatmap-card">
             <div className="goal-heatmap-heading">
               <div>
-                <span className="insight-label">월간 목표 리듬</span>
+                <span className="insight-label">{periodName} 목표 리듬</span>
                 <p>
                   기록 완료한 날은 목표에 가까울수록 진한 녹색, 벗어난 날은 가장
-                  차이가 큰 항목의 색으로 표시합니다. 기본일의 근접 범위는 칼로리
-                  ±10%, 탄단지 ±15%입니다.
+                  차이가 큰 항목의 색으로 표시합니다. 운동 없는 날의 근접 범위는
+                  칼로리 ±10%, 탄단지 ±15%입니다.
                 </p>
               </div>
               <div className="goal-heatmap-summary">
@@ -3574,12 +3760,17 @@ function InsightsPanel({
               <span className="fat">지방 차이</span>
               <span className="recording">기록 중</span>
             </div>
-            <div className="goal-heatmap-weekdays" aria-hidden="true">
-              {WEEKDAYS.map((weekday) => (
-                <span key={weekday}>{weekday}</span>
-              ))}
-            </div>
-            <div className="goal-heatmap" aria-label="날짜별 영양 목표 달성">
+            {period !== "day" && (
+              <div className="goal-heatmap-weekdays" aria-hidden="true">
+                {WEEKDAYS.map((weekday) => (
+                  <span key={weekday}>{weekday}</span>
+                ))}
+              </div>
+            )}
+            <div
+              className={`goal-heatmap period-${period}`}
+              aria-label="날짜별 영양 목표 달성"
+            >
               {Array.from({ length: heatmapLeadingCells }, (_, index) => (
                 <span className="goal-day-placeholder" key={`blank-${index}`} />
               ))}
@@ -3630,10 +3821,8 @@ function InsightsPanel({
                   <strong>{displayDate(selectedAdherence.date)}</strong>
                   <span>
                     {dayTypes[selectedAdherence.date] === "exercise"
-                      ? "운동일"
-                      : dayTypes[selectedAdherence.date] === "rest"
-                        ? "휴식일"
-                        : "기본일"}
+                      ? "운동 하는 날"
+                      : "운동 없는 날"}
                   </span>
                 </div>
                 {selectedAdherence.status === "empty" ? (
@@ -3688,8 +3877,14 @@ function InsightsPanel({
           </article>
           <article className="insight-card trend-card">
             <div>
-              <span className="insight-label">일별 섭취 열량</span>
-              <p>막대에 날짜별 총 섭취량을 표시합니다.</p>
+              <span className="insight-label">
+                {period === "day" ? "이날 섭취 열량" : "일별 섭취 열량"}
+              </span>
+              <p>
+                {period === "day"
+                  ? "선택한 날짜의 총 섭취량입니다."
+                  : "막대에 날짜별 총 섭취량을 표시합니다."}
+              </p>
             </div>
             <div className="trend-bars" aria-label="날짜별 섭취 열량">
               {insights.dailyTotals.map((day) => (
@@ -3731,8 +3926,8 @@ function InsightsPanel({
             <div>
               <span className="insight-label">시간대별 영양 섭취</span>
               <p>
-                00시부터 23시까지, 각 항목의 하루 평균 섭취량을 독립된 막대로
-                비교합니다.
+                00시부터 23시까지, 칼로리와 탄단지를 서로 합치지 않고 독립된
+                막대로 비교합니다. {averageCaption}입니다.
               </p>
             </div>
             <div
@@ -3750,7 +3945,9 @@ function InsightsPanel({
                   <section className={`time-series-row ${metric.key}`} key={metric.key}>
                     <div className="time-series-label">
                       <span>{metric.label}</span>
-                      <small>{metric.unit} · 하루 평균</small>
+                      <small>
+                        {metric.unit} · {period === "day" ? "실제 섭취" : "하루 평균"}
+                      </small>
                     </div>
                     <div className="time-series-bars">
                       {insights.nutritionTimeBuckets.map((bucket) => {

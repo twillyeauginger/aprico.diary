@@ -149,7 +149,7 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         model,
-        reasoning: { effort: "low" },
+        reasoning: { effort: "medium" },
         input: [
           {
             role: "user",
@@ -160,8 +160,11 @@ export async function POST(request: Request) {
 
 먼저 이미지가 일반 음식, 포장 전면, 영양정보 표, 또는 판별 불가인지 구분하세요.
 - 영양정보 표라면 사진에서 직접 읽을 수 있는 수치만 사용하고 sourceType을 label로 지정하세요.
-- 일반 음식 사진이라면 보이는 음식별로 나누고, 대략적인 중량과 열량 및 영양소를 추정하되 sourceType을 ai_estimate로 지정하세요.
-- 소스, 조리유, 숨은 재료처럼 사진만으로 알 수 없는 요소는 warnings에 적으세요.
+- 일반 음식 사진이라면 먼저 서로 구분되는 모든 음식과 음료를 빠짐없이 목록화한 뒤, 겹쳐 보이는 음식을 중복 계산하지 마세요.
+- 접시·용기·먹지 않는 부분을 제외한 실제 가식부를 추정하세요. 접시 크기, 수저, 포장 규격처럼 화면에서 확인 가능한 기준물과 통상적인 1회 제공량을 함께 비교하세요.
+- 각 음식의 조리법과 보이는 재료를 고려해 대략적인 중량과 열량 및 영양소를 추정하고 sourceType을 ai_estimate로 지정하세요.
+- 열량 추정치는 탄수화물·단백질 1g당 약 4kcal, 지방 1g당 약 9kcal와 크게 모순되지 않는지 교차 확인하고, 차이가 크면 값을 다시 검토하세요.
+- 소스, 조리유, 숨은 재료, 촬영 각도 때문에 확인할 수 없는 요소는 warnings에 적고 confidence를 낮추세요. 보이지 않는 재료를 확정적으로 단정하지 마세요.
 - 한국어로 음식명과 요약을 작성하세요.
 - 칼로리는 kcal, 탄수화물·단백질·지방·당류·식이섬유는 g, 나트륨은 mg 단위입니다.
 - confidence는 0에서 1 사이입니다.
