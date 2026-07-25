@@ -1583,6 +1583,7 @@ export function NutritionDashboard({
         />
       ) : (
         <ProfilePanel
+          key={JSON.stringify(nutritionGoals)}
           email={userEmail}
           goals={nutritionGoals}
           onSave={async (goals) => {
