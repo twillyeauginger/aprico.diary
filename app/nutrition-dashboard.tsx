@@ -102,6 +102,20 @@ export type SavedFood = {
 
 export type SavedFoodInput = Omit<SavedFood, "id">;
 
+type NutritionGoals = {
+  calories: number;
+  carbs: number;
+  protein: number;
+  fat: number;
+};
+
+const DEFAULT_GOALS: NutritionGoals = {
+  calories: 2000,
+  carbs: 250,
+  protein: 100,
+  fat: 65,
+};
+
 export type NutritionClient = {
   listMeals(month: string): Promise<MealRecord[]>;
   listAllMeals(): Promise<MealRecord[]>;
@@ -443,8 +457,20 @@ export function NutritionDashboard({
   );
   const [selectedDate, setSelectedDate] = useState(dateKey(today));
   const [activeView, setActiveView] = useState<
-    "calendar" | "foods" | "foodDb" | "insights"
+    "calendar" | "foods" | "foodDb" | "insights" | "profile"
   >("calendar");
+  const [nutritionGoals, setNutritionGoals] = useState<NutritionGoals>(() => {
+    if (typeof window === "undefined") return DEFAULT_GOALS;
+    const storageKey = `nutrition-goals:${userEmail ?? "local"}`;
+    const stored = window.localStorage.getItem(storageKey);
+    if (!stored) return DEFAULT_GOALS;
+    try {
+      return { ...DEFAULT_GOALS, ...JSON.parse(stored) };
+    } catch {
+      window.localStorage.removeItem(storageKey);
+      return DEFAULT_GOALS;
+    }
+  });
   const [meals, setMeals] = useState<MealRecord[]>([]);
   const [isDemo, setIsDemo] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -489,6 +515,13 @@ export function NutritionDashboard({
     | null
   >(null);
   const [toast, setToast] = useState("");
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      `nutrition-goals:${userEmail ?? "local"}`,
+      JSON.stringify(nutritionGoals),
+    );
+  }, [nutritionGoals, userEmail]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1152,6 +1185,13 @@ export function NutritionDashboard({
           >
             인사이트
           </button>
+          <button
+            className={activeView === "profile" ? "active" : ""}
+            type="button"
+            onClick={() => setActiveView("profile")}
+          >
+            마이페이지
+          </button>
         </nav>
         <div className="profile-actions">
           <div
@@ -1225,7 +1265,7 @@ export function NutritionDashboard({
               : monthInsights.totals.calories / Math.max(monthInsights.dayCount, 1),
           )}
           unit="kcal"
-          goal={2000}
+          goal={nutritionGoals.calories}
           primary
         />
         <SummaryCard
@@ -1236,7 +1276,7 @@ export function NutritionDashboard({
               : monthInsights.totals.carbs / Math.max(monthInsights.dayCount, 1),
           )}
           unit="g"
-          goal={250}
+          goal={nutritionGoals.carbs}
         />
         <SummaryCard
           label="단백질"
@@ -1246,7 +1286,7 @@ export function NutritionDashboard({
               : monthInsights.totals.protein / Math.max(monthInsights.dayCount, 1),
           )}
           unit="g"
-          goal={100}
+          goal={nutritionGoals.protein}
         />
         <SummaryCard
           label="지방"
@@ -1256,7 +1296,7 @@ export function NutritionDashboard({
               : monthInsights.totals.fat / Math.max(monthInsights.dayCount, 1),
           )}
           unit="g"
-          goal={65}
+          goal={nutritionGoals.fat}
         />
       </section>}
 
@@ -1459,11 +1499,12 @@ export function NutritionDashboard({
           loading={foodListLoading}
           meals={filteredAllMeals}
           dailyMeals={allMeals}
+          goals={nutritionGoals}
           query={foodListQuery}
           onQueryChange={setFoodListQuery}
           onEdit={openEdit}
         />
-      ) : (
+      ) : activeView === "foodDb" ? (
         <SavedFoodPanel
           foods={savedFoods}
           loading={savedFoodsLoading}
@@ -1471,6 +1512,15 @@ export function NutritionDashboard({
           onAddToMeal={addSavedFoodToMeal}
           onDelete={(food) => setDeleteTarget({ kind: "savedFood", item: food })}
           onEdit={openSavedFoodEditor}
+        />
+      ) : (
+        <ProfilePanel
+          email={userEmail}
+          goals={nutritionGoals}
+          onSave={(goals) => {
+            setNutritionGoals(goals);
+            showToast("하루 영양 목표를 저장했어요.");
+          }}
         />
       )}
 
@@ -2291,6 +2341,7 @@ function FoodListPanel({
   loading,
   meals,
   dailyMeals,
+  goals,
   query,
   onQueryChange,
   onEdit,
@@ -2298,6 +2349,7 @@ function FoodListPanel({
   loading: boolean;
   meals: MealRecord[];
   dailyMeals: MealRecord[];
+  goals: NutritionGoals;
   query: string;
   onQueryChange: (query: string) => void;
   onEdit: (meal: MealRecord) => void;
@@ -2339,17 +2391,20 @@ function FoodListPanel({
         <div className="daily-goal-section">
           <div className="daily-goal-heading">
             <strong>날짜별 목표 달성</strong>
-            <span>칼로리 2,000 kcal · 탄 250g · 단 100g · 지 65g 기준</span>
+            <span>
+              칼로리 {goals.calories.toLocaleString()} kcal · 탄 {goals.carbs}g ·
+              단 {goals.protein}g · 지 {goals.fat}g 기준
+            </span>
           </div>
           <div className="daily-goal-list">
             {dailyTotals.map((day) => (
               <article className="daily-goal-card" key={day.date}>
                 <strong>{day.date}</strong>
                 {[
-                  ["칼", day.calories, 2000, "kcal", "calories"],
-                  ["탄", day.carbs, 250, "g", "carbs"],
-                  ["단", day.protein, 100, "g", "protein"],
-                  ["지", day.fat, 65, "g", "fat"],
+                  ["칼", day.calories, goals.calories, "kcal", "calories"],
+                  ["탄", day.carbs, goals.carbs, "g", "carbs"],
+                  ["단", day.protein, goals.protein, "g", "protein"],
+                  ["지", day.fat, goals.fat, "g", "fat"],
                 ].map(([label, value, goal, unit, nutrient]) => {
                   const numericValue = Number(value);
                   const numericGoal = Number(goal);
@@ -2462,6 +2517,64 @@ function FoodListPanel({
           </table>
         </div>
       )}
+    </section>
+  );
+}
+
+function ProfilePanel({
+  email,
+  goals,
+  onSave,
+}: {
+  email?: string;
+  goals: NutritionGoals;
+  onSave: (goals: NutritionGoals) => void;
+}) {
+  const [form, setForm] = useState(goals);
+  return (
+    <section className="profile-panel" aria-labelledby="profile-title">
+      <div className="profile-heading">
+        <p className="eyebrow">나의 기준</p>
+        <h2 id="profile-title">마이페이지</h2>
+        <p>{email ?? "내 계정"} · 하루 권장 섭취 목표를 관리합니다.</p>
+      </div>
+      <form
+        className="goal-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave(form);
+        }}
+      >
+        {[
+          ["calories", "칼로리", "kcal", "하루 에너지 목표"],
+          ["carbs", "탄수화물", "g", "하루 탄수화물 목표"],
+          ["protein", "단백질", "g", "하루 단백질 목표"],
+          ["fat", "지방", "g", "하루 지방 목표"],
+        ].map(([key, label, unit, description]) => (
+          <label className={`goal-input-card ${key}`} key={key}>
+            <span>{label}</span>
+            <small>{description}</small>
+            <div>
+              <input
+                min="1"
+                inputMode="decimal"
+                type="number"
+                value={form[key as keyof NutritionGoals]}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    [key]: Math.max(1, Number(event.target.value) || 1),
+                  })
+                }
+              />
+              <strong>{unit}</strong>
+            </div>
+          </label>
+        ))}
+        <button className="primary-button wide-button" type="submit">
+          하루 목표 저장
+        </button>
+      </form>
     </section>
   );
 }
