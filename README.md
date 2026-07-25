@@ -11,6 +11,7 @@
 - 칼로리, 탄수화물, 단백질, 지방 요약
 - 일·주·월 인사이트와 24시간대별 독립 영양 그래프
 - 음식 직접 입력 및 식품 데이터 검색
+- 음식 이름으로 식약처·USDA 공식 영양 DB 값을 불러와 수정 후 기록
 - 음식·영양정보 사진 업로드
 - OpenAI 이미지 분석 결과 확인 후 저장
 - 데이터 출처를 검증 DB, 제품 표시값, AI 추정값으로 구분
@@ -55,14 +56,17 @@ Edge Function 비밀값은 Supabase에만 설정합니다.
 - `OPENAI_API_KEY`: 음식 사진 분석
 - `OPENAI_MODEL`: 이미지 분석 모델, 기본값 `gpt-5.6-sol` (사진 분석은
   원본 해상도와 medium 추론 강도 사용)
+- `OPENAI_LOOKUP_MODEL`: 한국어 음식명을 USDA 검색어로 바꾸는 저비용 모델,
+  기본값 `gpt-5.6-luna`
 - `FOOD_DB_API_KEY`: 식약처 식품영양성분 DB 검색
+- `USDA_FOODDATA_API_KEY`: USDA FoodData Central 검색. 비어 있으면
+  저용량 `DEMO_KEY`를 사용합니다.
 - `APP_ORIGIN`: 기본 허용 주소, `https://twillyeauginger.github.io`
 - `APP_ORIGINS`: 추가 허용 주소를 쉼표로 구분
 - `CHATGPT_API_TOKEN`: Custom GPT Action 전용 Bearer 토큰
 - `CHATGPT_USER_ID`: Action이 기록할 Supabase Auth 사용자 UUID
 
-`OPENAI_API_KEY`와 `FOOD_DB_API_KEY`는 GitHub 변수나 프런트엔드 코드에
-넣지 않습니다.
+API 키는 GitHub 변수나 프런트엔드 코드에 넣지 않습니다.
 
 ## GitHub Pages
 
@@ -76,6 +80,7 @@ Edge Function 비밀값은 Supabase에만 설정합니다.
 - `OPENAI_API_KEY`: 음식 사진 분석
 - `OPENAI_MODEL`: 이미지 분석 모델
 - `FOOD_DB_API_KEY`: 식약처 식품영양성분 DB 검색
+- `USDA_FOODDATA_API_KEY`: USDA FoodData Central 검색
 
 API 키는 저장소에 커밋하지 않습니다.
 

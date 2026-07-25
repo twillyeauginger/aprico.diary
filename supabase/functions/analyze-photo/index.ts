@@ -97,6 +97,83 @@ function outputText(response: Record<string, unknown>) {
   throw new Error("AI 분석 결과를 읽지 못했습니다.");
 }
 
+function openAiErrorMessage(
+  status: number,
+  raw: Record<string, unknown>,
+) {
+  const apiError = raw.error as Record<string, unknown> | undefined;
+  const code = typeof apiError?.code === "string" ? apiError.code : "";
+  if (status === 429 && code === "insufficient_quota") {
+    return "OpenAI API 사용 한도를 확인해주세요.";
+  }
+  if (status === 429) {
+    return "사진 분석 요청이 잠시 몰렸습니다. 잠시 후 다시 시도해주세요.";
+  }
+  if (status >= 500) {
+    return "OpenAI 서버가 일시적으로 응답하지 않았습니다. 잠시 후 다시 시도해주세요.";
+  }
+  if (status === 401 || status === 403) {
+    return "OpenAI API 연결 정보를 확인해주세요.";
+  }
+  return typeof apiError?.message === "string"
+    ? apiError.message
+    : "OpenAI 사진 분석 요청에 실패했습니다.";
+}
+
+async function requestOpenAi(
+  openAiKey: string,
+  payload: Record<string, unknown>,
+) {
+  const retryableStatuses = new Set([408, 409, 429]);
+  let lastError = "사진 분석 요청에 실패했습니다.";
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${openAiKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const raw = (await response.json().catch(() => ({}))) as Record<
+        string,
+        unknown
+      >;
+      if (response.ok) return raw;
+      lastError = openAiErrorMessage(response.status, raw);
+      const apiError = raw.error as Record<string, unknown> | undefined;
+      const isQuotaExhausted =
+        response.status === 429 && apiError?.code === "insufficient_quota";
+      const shouldRetry =
+        !isQuotaExhausted &&
+        (retryableStatuses.has(response.status) || response.status >= 500);
+      const requestId =
+        response.headers.get("x-request-id") ??
+        response.headers.get("openai-request-id") ??
+        "unknown";
+      console.warn("analyze-photo OpenAI attempt failed", {
+        attempt,
+        status: response.status,
+        requestId,
+        shouldRetry,
+      });
+      if (!shouldRetry || attempt === 3) throw new Error(lastError);
+    } catch (error) {
+      if (error instanceof Error && error.message === lastError) throw error;
+      lastError =
+        "사진 분석 서버 연결이 잠시 불안정합니다. 잠시 후 다시 시도해주세요.";
+      console.warn("analyze-photo OpenAI network attempt failed", {
+        attempt,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      if (attempt === 3) throw new Error(lastError);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 450 * 2 ** (attempt - 1)));
+  }
+  throw new Error(lastError);
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return handlePreflight(request);
   if (request.method !== "POST") return json(request, { error: "POST 요청만 지원합니다." }, 405);
@@ -139,22 +216,16 @@ Deno.serve(async (request) => {
     const bytes = new Uint8Array(await photo.arrayBuffer());
     const imageUrl = `data:${photo.type};base64,${bytesToBase64(bytes)}`;
     const model = Deno.env.get("OPENAI_MODEL") || "gpt-5.6-sol";
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${openAiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        reasoning: { effort: "medium" },
-        input: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "input_text",
-                text: `이 이미지를 개인 영양 기록용으로 분석하세요.
+    const raw = await requestOpenAi(openAiKey, {
+      model,
+      reasoning: { effort: "medium" },
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: `이 이미지를 개인 영양 기록용으로 분석하세요.
 
 먼저 이미지가 일반 음식, 포장 전면, 영양정보 표, 또는 판별 불가인지 구분하세요.
 - 영양정보 표라면 사진에서 직접 읽을 수 있는 수치만 사용하고 sourceType을 label로 지정하세요.
@@ -167,36 +238,25 @@ Deno.serve(async (request) => {
 - 칼로리는 kcal, 탄수화물·단백질·지방·당류·식이섬유는 g, 나트륨은 mg 단위입니다.
 - confidence는 0에서 1 사이입니다.
 - 정확한 의료 판단을 하지 말고 항상 사용자 확인이 필요한지 표시하세요.`,
-              },
-              {
-                type: "input_image",
-                image_url: imageUrl,
-                detail: "original",
-              },
-            ],
-          },
-        ],
-        text: {
-          format: {
-            type: "json_schema",
-            name: "nutrition_photo_analysis",
-            strict: true,
-            schema: analysisSchema,
-          },
-          verbosity: "low",
+            },
+            {
+              type: "input_image",
+              image_url: imageUrl,
+              detail: "original",
+            },
+          ],
         },
-      }),
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "nutrition_photo_analysis",
+          strict: true,
+          schema: analysisSchema,
+        },
+        verbosity: "low",
+      },
     });
-
-    const raw = (await response.json()) as Record<string, unknown>;
-    if (!response.ok) {
-      const apiError = raw.error as Record<string, unknown> | undefined;
-      throw new Error(
-        typeof apiError?.message === "string"
-          ? apiError.message
-          : "OpenAI 사진 분석 요청에 실패했습니다.",
-      );
-    }
     return json(request, {
       ...(JSON.parse(outputText(raw)) as Record<string, unknown>),
       photoId: photoPath,

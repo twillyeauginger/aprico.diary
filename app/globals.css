@@ -2217,11 +2217,29 @@ button {
   font-size: 10px;
 }
 
-.food-result .result-kcal {
+.food-result .result-kcal,
+.food-result .result-nutrition {
   color: var(--ink);
   font-size: 14px;
   font-weight: 850;
   white-space: nowrap;
+}
+
+.food-result .result-nutrition {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 3px;
+  text-align: right;
+}
+
+.food-result .result-nutrition strong {
+  margin: 0;
+}
+
+.food-result .result-nutrition small {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 750;
 }
 
 .helper-note {
@@ -2229,6 +2247,71 @@ button {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.6;
+}
+
+.manual-food-name-field > small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.manual-food-lookup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.manual-food-results {
+  margin: -2px 0 16px;
+  border-radius: 16px;
+  background: rgba(239, 234, 223, 0.46);
+  padding: 10px;
+}
+
+.official-food-loaded {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+  border: 1px solid #b7c9ba;
+  border-radius: 17px;
+  background: var(--sage-pale);
+  padding: 14px;
+}
+
+.official-food-loaded > div {
+  display: grid;
+  gap: 3px;
+}
+
+.official-food-loaded span {
+  color: var(--sage-dark);
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.official-food-loaded strong {
+  font-size: 12px;
+}
+
+.official-food-loaded p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.official-food-loaded button {
+  flex: 0 0 auto;
+  border: 1px solid var(--sage);
+  border-radius: 999px;
+  background: var(--white);
+  padding: 8px 10px;
+  color: var(--sage-dark);
+  font-size: 9px;
+  font-weight: 850;
+  cursor: pointer;
 }
 
 .saved-food-quantity {
@@ -2635,6 +2718,27 @@ button {
 
   .field-row {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .manual-food-lookup {
+    grid-template-columns: 1fr;
+  }
+
+  .manual-food-lookup .search-button {
+    min-height: 44px;
+  }
+
+  .official-food-loaded,
+  .food-result {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .food-result .result-nutrition {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    text-align: left;
   }
 
   .demo-banner {

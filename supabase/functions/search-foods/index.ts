@@ -5,57 +5,6 @@ import {
   requestOriginAllowed,
 } from "../_shared/http.ts";
 
-const examples = [
-  {
-    id: "example-yogurt",
-    name: "플레인 그릭요거트",
-    maker: "예시 항목",
-    servingAmount: 100,
-    servingUnit: "g",
-    calories: 120,
-    carbs: 8,
-    protein: 10,
-    fat: 5,
-    sugar: 5,
-    sodium: 55,
-    fiber: 0,
-    sourceType: "reference",
-    sourceLabel: "공식 DB 연결 전 참고값",
-  },
-  {
-    id: "example-chicken",
-    name: "닭가슴살 구이",
-    maker: "예시 항목",
-    servingAmount: 100,
-    servingUnit: "g",
-    calories: 165,
-    carbs: 0,
-    protein: 31,
-    fat: 3.6,
-    sugar: 0,
-    sodium: 74,
-    fiber: 0,
-    sourceType: "reference",
-    sourceLabel: "공식 DB 연결 전 참고값",
-  },
-  {
-    id: "example-rice",
-    name: "현미밥",
-    maker: "예시 항목",
-    servingAmount: 210,
-    servingUnit: "g",
-    calories: 315,
-    carbs: 68,
-    protein: 6,
-    fat: 2.4,
-    sugar: 0.6,
-    sodium: 7,
-    fiber: 3.5,
-    sourceType: "reference",
-    sourceLabel: "공식 DB 연결 전 참고값",
-  },
-];
-
 function pick(item: Record<string, unknown>, keys: string[], fallback = "") {
   for (const key of keys) {
     const value = item[key];
@@ -65,13 +14,185 @@ function pick(item: Record<string, unknown>, keys: string[], fallback = "") {
 }
 
 function numeric(item: Record<string, unknown>, keys: string[]) {
-  const value = Number(pick(item, keys, 0));
+  const raw = String(pick(item, keys, 0)).replaceAll(",", "");
+  const value = Number(raw.match(/-?\d+(?:\.\d+)?/)?.[0] ?? 0);
   return Number.isFinite(value) ? value : 0;
+}
+
+function responseText(response: Record<string, unknown>) {
+  const output = Array.isArray(response.output) ? response.output : [];
+  for (const item of output) {
+    const content = Array.isArray((item as Record<string, unknown>).content)
+      ? ((item as Record<string, unknown>).content as unknown[])
+      : [];
+    for (const part of content) {
+      const record = part as Record<string, unknown>;
+      if (record.type === "output_text" && typeof record.text === "string") {
+        return record.text.trim();
+      }
+    }
+  }
+  return "";
+}
+
+async function translateForUsda(query: string) {
+  if (!/[가-힣]/.test(query)) return query;
+  const openAiKey = Deno.env.get("OPENAI_API_KEY");
+  if (!openAiKey) return query;
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${openAiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: Deno.env.get("OPENAI_LOOKUP_MODEL") || "gpt-5.6-luna",
+        reasoning: { effort: "none" },
+        input: `Translate this Korean food name into a concise English USDA FoodData Central search phrase. Preserve cooking method and main ingredients. Return only the search phrase: ${query}`,
+        text: { verbosity: "low" },
+      }),
+    });
+    if (!response.ok) return query;
+    const translated = responseText(
+      (await response.json()) as Record<string, unknown>,
+    );
+    return translated || query;
+  } catch {
+    return query;
+  }
+}
+
+function usdaNutrient(
+  food: Record<string, unknown>,
+  names: string[],
+  unit?: string,
+) {
+  const nutrients = Array.isArray(food.foodNutrients)
+    ? (food.foodNutrients as Array<Record<string, unknown>>)
+    : [];
+  const wanted = names.map((name) => name.toLowerCase());
+  const found = nutrients.find(
+    (nutrient) =>
+      wanted.includes(String(nutrient.nutrientName ?? "").toLowerCase()) &&
+      (!unit || String(nutrient.unitName ?? "").toUpperCase() === unit),
+  );
+  const value = Number(found?.value ?? 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
+async function searchUsda(query: string) {
+  const translatedQuery = await translateForUsda(query);
+  const apiKey = Deno.env.get("USDA_FOODDATA_API_KEY") || "DEMO_KEY";
+  const endpoint = new URL(
+    "https://api.nal.usda.gov/fdc/v1/foods/search",
+  );
+  endpoint.searchParams.set("api_key", apiKey);
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      query: translatedQuery,
+      pageSize: 12,
+      dataType: ["Foundation", "Survey (FNDDS)", "SR Legacy"],
+    }),
+  });
+  if (!response.ok) {
+    if (response.status === 429) {
+      throw new Error(
+        "공식 영양 DB의 임시 검색 한도를 초과했습니다. 잠시 후 다시 시도해주세요.",
+      );
+    }
+    throw new Error("USDA 공식 영양 DB가 응답하지 않았습니다.");
+  }
+  const body = (await response.json()) as Record<string, unknown>;
+  const rawFoods = Array.isArray(body.foods) ? body.foods : [];
+  return rawFoods.slice(0, 12).map((raw, index) => {
+    const food = raw as Record<string, unknown>;
+    const description = String(food.description ?? translatedQuery);
+    return {
+      id: `usda-${String(food.fdcId ?? index)}`,
+      name: query,
+      maker: description,
+      servingAmount: 100,
+      servingUnit: "g",
+      calories: usdaNutrient(food, ["Energy"], "KCAL"),
+      carbs: usdaNutrient(food, ["Carbohydrate, by difference"]),
+      protein: usdaNutrient(food, ["Protein"]),
+      fat: usdaNutrient(food, ["Total lipid (fat)"]),
+      sugar: usdaNutrient(food, [
+        "Total Sugars",
+        "Sugars, total including NLEA",
+      ]),
+      sodium: usdaNutrient(food, ["Sodium, Na"]),
+      fiber: usdaNutrient(food, ["Fiber, total dietary"]),
+      sourceType: "database",
+      sourceLabel: "USDA FoodData Central · 100g 기준",
+    };
+  });
+}
+
+async function searchMfds(query: string, apiKey: string) {
+  const endpoint = new URL(
+    "https://apis.data.go.kr/1471000/FoodNtrCpntDbInfo02/getFoodNtrCpntDbInq02",
+  );
+  endpoint.searchParams.set("serviceKey", apiKey);
+  endpoint.searchParams.set("type", "json");
+  endpoint.searchParams.set("pageNo", "1");
+  endpoint.searchParams.set("numOfRows", "12");
+  endpoint.searchParams.set("FOOD_NM_KR", query);
+
+  const response = await fetch(endpoint, {
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) throw new Error("식약처 공식 식품 DB가 응답하지 않았습니다.");
+
+  const body = (await response.json()) as Record<string, unknown>;
+  const bodyContainer =
+    (body.body as Record<string, unknown> | undefined) ??
+    ((body.response as Record<string, unknown> | undefined)?.body as
+      | Record<string, unknown>
+      | undefined);
+  const itemContainer = bodyContainer?.items;
+  const rawItems = Array.isArray(itemContainer)
+    ? itemContainer
+    : Array.isArray((itemContainer as Record<string, unknown> | undefined)?.item)
+      ? ((itemContainer as Record<string, unknown>).item as unknown[])
+      : [];
+  return rawItems.slice(0, 12).map((raw, index) => {
+    const item = raw as Record<string, unknown>;
+    return {
+      id: String(pick(item, ["FOOD_CD", "foodCd", "NUM"], `mfds-${index}`)),
+      name: String(pick(item, ["FOOD_NM_KR", "foodNm", "FOOD_NM"], query)),
+      maker: String(pick(item, ["MKR_NM", "makerNm", "COMPANY_NM"], "")),
+      servingAmount:
+        numeric(item, [
+          "NUT_CON_SRTR_QUA",
+          "SERVING_SIZE",
+          "foodSize",
+        ]) || 100,
+      servingUnit: "g",
+      calories: numeric(item, ["AMT_NUM1", "ENERGY_KCAL", "enerc"]),
+      carbs: numeric(item, ["AMT_NUM7", "CHOCDF", "carbohydrate"]),
+      protein: numeric(item, ["AMT_NUM3", "PROT", "protein"]),
+      fat: numeric(item, ["AMT_NUM4", "FATCE", "fat"]),
+      sugar: numeric(item, ["AMT_NUM8", "SUGAR", "sugar"]),
+      sodium: numeric(item, ["AMT_NUM13", "NA", "sodium"]),
+      fiber: numeric(item, ["AMT_NUM6", "FIBER", "fiber"]),
+      sourceType: "database",
+      sourceLabel: "식약처 식품영양성분 DB",
+    };
+  });
 }
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return handlePreflight(request);
-  if (request.method !== "POST") return json(request, { error: "POST 요청만 지원합니다." }, 405);
+  if (request.method !== "POST") {
+    return json(request, { error: "POST 요청만 지원합니다." }, 405);
+  }
   if (!requestOriginAllowed(request)) {
     return json(request, { error: "허용되지 않은 요청 출처입니다." }, 403);
   }
@@ -84,69 +205,20 @@ Deno.serve(async (request) => {
     const normalizedQuery = query?.trim() ?? "";
     if (!normalizedQuery) return json(request, { foods: [] });
 
-    const apiKey = Deno.env.get("FOOD_DB_API_KEY");
-    if (!apiKey) {
-      const normalized = normalizedQuery.toLowerCase();
-      const matches = examples.filter((item) =>
-        item.name.toLowerCase().includes(normalized),
-      );
-      return json(request, { foods: matches.length > 0 ? matches : examples });
+    const mfdsApiKey = Deno.env.get("FOOD_DB_API_KEY");
+    if (mfdsApiKey) {
+      try {
+        const foods = await searchMfds(normalizedQuery, mfdsApiKey);
+        if (foods.length > 0) return json(request, { foods });
+      } catch (error) {
+        console.warn(
+          "MFDS food search failed; using USDA fallback",
+          error instanceof Error ? error.message : error,
+        );
+      }
     }
 
-    const endpoint = new URL(
-      "https://apis.data.go.kr/1471000/FoodNtrCpntDbInfo02/getFoodNtrCpntDbInq02",
-    );
-    endpoint.searchParams.set("serviceKey", apiKey);
-    endpoint.searchParams.set("type", "json");
-    endpoint.searchParams.set("pageNo", "1");
-    endpoint.searchParams.set("numOfRows", "12");
-    endpoint.searchParams.set("FOOD_NM_KR", normalizedQuery);
-
-    const response = await fetch(endpoint, {
-      headers: { accept: "application/json" },
-    });
-    if (!response.ok) throw new Error("공식 식품 DB가 응답하지 않았습니다.");
-
-    const body = (await response.json()) as Record<string, unknown>;
-    const bodyContainer =
-      (body.body as Record<string, unknown> | undefined) ??
-      ((body.response as Record<string, unknown> | undefined)?.body as
-        | Record<string, unknown>
-        | undefined);
-    const itemContainer = bodyContainer?.items;
-    const rawItems = Array.isArray(itemContainer)
-      ? itemContainer
-      : Array.isArray((itemContainer as Record<string, unknown> | undefined)?.item)
-        ? ((itemContainer as Record<string, unknown>).item as unknown[])
-        : [];
-    const foods = rawItems.slice(0, 12).map((raw, index) => {
-      const item = raw as Record<string, unknown>;
-      return {
-        id: String(
-          pick(item, ["FOOD_CD", "foodCd", "NUM"], `mfds-${index}`),
-        ),
-        name: String(
-          pick(item, ["FOOD_NM_KR", "foodNm", "FOOD_NM"], normalizedQuery),
-        ),
-        maker: String(pick(item, ["MKR_NM", "makerNm", "COMPANY_NM"], "")),
-        servingAmount: numeric(item, [
-          "NUT_CON_SRTR_QUA",
-          "SERVING_SIZE",
-          "foodSize",
-        ]),
-        servingUnit: "g",
-        calories: numeric(item, ["AMT_NUM1", "ENERGY_KCAL", "enerc"]),
-        carbs: numeric(item, ["AMT_NUM7", "CHOCDF", "carbohydrate"]),
-        protein: numeric(item, ["AMT_NUM3", "PROT", "protein"]),
-        fat: numeric(item, ["AMT_NUM4", "FATCE", "fat"]),
-        sugar: numeric(item, ["AMT_NUM8", "SUGAR", "sugar"]),
-        sodium: numeric(item, ["AMT_NUM13", "NA", "sodium"]),
-        fiber: numeric(item, ["AMT_NUM6", "FIBER", "fiber"]),
-        sourceType: "database",
-        sourceLabel: "식약처 식품영양성분 DB",
-      };
-    });
-    return json(request, { foods });
+    return json(request, { foods: await searchUsda(normalizedQuery) });
   } catch (error) {
     return json(
       request,
@@ -154,7 +226,7 @@ Deno.serve(async (request) => {
         error:
           error instanceof Error
             ? error.message
-            : "식품 DB를 검색하지 못했습니다.",
+            : "공식 식품 DB를 검색하지 못했습니다.",
       },
       502,
     );

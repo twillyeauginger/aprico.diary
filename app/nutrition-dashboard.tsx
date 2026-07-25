@@ -934,6 +934,11 @@ export function NutritionDashboard({
   );
   const [manual, setManual] = useState(emptyManual(selectedDate));
   const [loadedSavedFood, setLoadedSavedFood] = useState<SavedFood | null>(null);
+  const [loadedFoodResult, setLoadedFoodResult] =
+    useState<FoodResult | null>(null);
+  const [manualFoodResults, setManualFoodResults] = useState<FoodResult[]>([]);
+  const [manualFoodSearching, setManualFoodSearching] = useState(false);
+  const [manualFoodSearchDone, setManualFoodSearchDone] = useState(false);
   const [savedFoodQuantity, setSavedFoodQuantity] = useState("1");
   const [editingMeal, setEditingMeal] = useState<MealRecord | null>(null);
   const [editForm, setEditForm] = useState(emptyManual(selectedDate));
@@ -1224,6 +1229,11 @@ export function NutritionDashboard({
     setModalOpen(true);
     setManual(emptyManual(selectedDate));
     setLoadedSavedFood(null);
+    setLoadedFoodResult(null);
+    setManualFoodResults([]);
+    setManualFoodSearchDone(false);
+    setQuery("");
+    setFoodResults([]);
     setSavedFoodQuantity("1");
   }
 
@@ -1247,6 +1257,9 @@ export function NutritionDashboard({
   function loadSavedFood(food: SavedFood) {
     setManual(emptyManual(selectedDate));
     setLoadedSavedFood(food);
+    setLoadedFoodResult(null);
+    setManualFoodResults([]);
+    setManualFoodSearchDone(false);
     setSavedFoodQuantity("1");
     applySavedFoodQuantity(food, 1);
     setActiveTab("manual");
@@ -1260,6 +1273,9 @@ export function NutritionDashboard({
     setBulkPercentPrompt(null);
     setPhotoFile(null);
     setLoadedSavedFood(null);
+    setLoadedFoodResult(null);
+    setManualFoodResults([]);
+    setManualFoodSearchDone(false);
     setSavedFoodQuantity("1");
     if (photoPreview) URL.revokeObjectURL(photoPreview);
     setPhotoPreview("");
@@ -1287,8 +1303,10 @@ export function NutritionDashboard({
         mealTime: manual.mealTime,
         mealType: manual.mealType,
         foodName: manual.foodName.trim(),
-        sourceType: "manual",
-        sourceLabel: loadedSavedFood ? "내 음식 DB" : "직접 입력",
+        sourceType: loadedFoodResult?.sourceType ?? "manual",
+        sourceLabel: loadedSavedFood
+          ? "내 음식 DB"
+          : loadedFoodResult?.sourceLabel ?? "직접 입력",
         servingAmount: Number(manual.servingAmount) || 1,
         servingUnit: manual.servingUnit || "인분",
         calories: Number(manual.calories) || 0,
@@ -1469,28 +1487,66 @@ export function NutritionDashboard({
     }
   }
 
-  async function addFoodResult(food: FoodResult) {
+  function loadFoodResult(food: FoodResult) {
+    setManual((current) => ({
+      ...current,
+      foodName: food.name,
+      servingAmount: String(food.servingAmount || 100),
+      servingUnit: food.servingUnit || "g",
+      calories: String(food.calories),
+      carbs: String(food.carbs),
+      protein: String(food.protein),
+      fat: String(food.fat),
+      sugar: String(food.sugar),
+      sodium: String(food.sodium),
+      fiber: String(food.fiber),
+    }));
+    setLoadedFoodResult(food);
+    setLoadedSavedFood(null);
+    setSavedFoodQuantity("1");
+    setManualFoodResults([]);
+    setManualFoodSearchDone(false);
+    setActiveTab("manual");
+  }
+
+  function updateManualServingAmount(value: string) {
+    if (!loadedFoodResult) {
+      setManual((current) => ({ ...current, servingAmount: value }));
+      return;
+    }
+    const ratio =
+      Math.max(0, Number(value) || 0) /
+      Math.max(loadedFoodResult.servingAmount, 1);
+    setManual((current) => ({
+      ...current,
+      servingAmount: value,
+      calories: String(loadedFoodResult.calories * ratio),
+      carbs: String(loadedFoodResult.carbs * ratio),
+      protein: String(loadedFoodResult.protein * ratio),
+      fat: String(loadedFoodResult.fat * ratio),
+      sugar: String(loadedFoodResult.sugar * ratio),
+      sodium: String(loadedFoodResult.sodium * ratio),
+      fiber: String(loadedFoodResult.fiber * ratio),
+    }));
+  }
+
+  async function searchManualFood() {
+    const foodName = manual.foodName.trim();
+    if (!foodName) {
+      showToast("먼저 음식 이름을 입력해주세요.");
+      return;
+    }
+    setManualFoodSearching(true);
+    setManualFoodSearchDone(false);
     try {
-      await saveMeal({
-        mealDate: selectedDate,
-        mealTime: new Date().toTimeString().slice(0, 5),
-        mealType: "점심",
-        foodName: food.name,
-        sourceType: food.sourceType,
-        sourceLabel: food.sourceLabel,
-        servingAmount: food.servingAmount,
-        servingUnit: food.servingUnit,
-        calories: food.calories,
-        carbs: food.carbs,
-        protein: food.protein,
-        fat: food.fat,
-        sugar: food.sugar,
-        sodium: food.sodium,
-        fiber: food.fiber,
-      });
-      closeModal();
+      setManualFoodResults(await client.searchFoods(foodName));
+      setManualFoodSearchDone(true);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "저장하지 못했습니다.");
+      showToast(error instanceof Error ? error.message : "검색하지 못했습니다.");
+      setManualFoodResults([]);
+      setManualFoodSearchDone(true);
+    } finally {
+      setManualFoodSearching(false);
     }
   }
 
@@ -1799,7 +1855,7 @@ export function NutritionDashboard({
         </div>
         <div>
           <p className="hero-copy">
-            음식 사진, 제품 검색, 직접 입력으로 기록할 수 있습니다. 확인된
+            음식 사진, 공식 DB 검색, 직접 입력으로 기록할 수 있습니다. 확인된
             영양정보와 추정값은 서로 구분해 표시합니다.
           </p>
           <div className="source-legend" aria-label="데이터 출처">
@@ -2146,7 +2202,7 @@ export function NutritionDashboard({
             <div className="empty-state">
               <div>
                 <strong>첫 끼를 기록해볼까요?</strong>
-                사진, 제품 검색, 직접 입력 중 편한 방법을 골라주세요.
+                사진, 공식 DB 검색, 직접 입력 중 편한 방법을 골라주세요.
               </div>
             </div>
           )}
@@ -2258,7 +2314,7 @@ export function NutritionDashboard({
                 aria-selected={activeTab === "search"}
                 onClick={() => setActiveTab("search")}
               >
-                제품 검색
+                공식 DB 검색
               </button>
               <button
                 className={activeTab === "photo" ? "active" : ""}
@@ -2276,6 +2332,9 @@ export function NutritionDashboard({
                 aria-selected={activeTab === "manual"}
                 onClick={() => {
                   setLoadedSavedFood(null);
+                  setLoadedFoodResult(null);
+                  setManualFoodResults([]);
+                  setManualFoodSearchDone(false);
                   setSavedFoodQuantity("1");
                   setActiveTab("manual");
                 }}
@@ -2355,8 +2414,9 @@ export function NutritionDashboard({
                     </button>
                   </form>
                   <p className="helper-note">
-                    식약처 식품영양성분 DB 연결 시 제품명·업체명·기준량을 함께
-                    확인합니다. 연결 전에는 기능을 살펴볼 수 있는 참고값이 표시돼요.
+                    식약처 식품영양성분 DB를 우선 사용하고, 결과가 없거나 연결되지
+                    않은 경우 USDA FoodData Central의 공식 분석값을 보여드립니다.
+                    결과를 선택한 뒤 섭취량과 시간을 수정할 수 있어요.
                   </p>
                   <div className="search-results">
                     {foodResults.map((food) => (
@@ -2364,7 +2424,7 @@ export function NutritionDashboard({
                         className="food-result"
                         type="button"
                         key={food.id}
-                        onClick={() => addFoodResult(food)}
+                        onClick={() => loadFoodResult(food)}
                       >
                         <span>
                           <strong>{food.name}</strong>
@@ -2374,8 +2434,12 @@ export function NutritionDashboard({
                             {food.servingUnit} · {food.sourceLabel}
                           </span>
                         </span>
-                        <span className="result-kcal">
-                          {Math.round(food.calories)} kcal
+                        <span className="result-nutrition">
+                          <strong>{Math.round(food.calories)} kcal</strong>
+                          <small>
+                            탄 {food.carbs.toFixed(1)} · 단 {food.protein.toFixed(1)} ·
+                            지 {food.fat.toFixed(1)}g
+                          </small>
                         </span>
                       </button>
                     ))}
@@ -2660,6 +2724,26 @@ export function NutritionDashboard({
                       </p>
                     </section>
                   )}
+                  {loadedFoodResult && (
+                    <section className="official-food-loaded">
+                      <div>
+                        <span>공식 영양 DB 적용</span>
+                        <strong>{loadedFoodResult.sourceLabel}</strong>
+                        <p>
+                          {loadedFoodResult.maker || loadedFoodResult.name}의{" "}
+                          {loadedFoodResult.servingAmount}
+                          {loadedFoodResult.servingUnit} 기준값을 불러왔습니다.
+                          섭취량을 바꾸면 영양성분도 함께 계산됩니다.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setLoadedFoodResult(null)}
+                      >
+                        직접 입력으로 전환
+                      </button>
+                    </section>
+                  )}
                   <div className="field-row">
                     <div className="field">
                       <label htmlFor="meal-date">날짜</label>
@@ -2698,17 +2782,82 @@ export function NutritionDashboard({
                       </select>
                     </div>
                   </div>
-                  <div className="field">
+                  <div className="field manual-food-name-field">
                     <label htmlFor="food-name">음식 이름</label>
-                    <input
-                      id="food-name"
-                      placeholder="예: 집에서 만든 닭가슴살 샐러드"
-                      value={manual.foodName}
-                      onChange={(event) =>
-                        setManual({ ...manual, foodName: event.target.value })
-                      }
-                    />
+                    <div className="manual-food-lookup">
+                      <input
+                        id="food-name"
+                        placeholder="예: 스크램블 에그, 구운 연어"
+                        value={manual.foodName}
+                        onChange={(event) => {
+                          setManual({ ...manual, foodName: event.target.value });
+                          setLoadedFoodResult(null);
+                          setManualFoodResults([]);
+                          setManualFoodSearchDone(false);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void searchManualFood();
+                          }
+                        }}
+                      />
+                      <button
+                        className="search-button"
+                        type="button"
+                        disabled={manualFoodSearching}
+                        onClick={searchManualFood}
+                      >
+                        {manualFoodSearching
+                          ? "공식 DB 검색 중"
+                          : "영양정보 불러오기"}
+                      </button>
+                    </div>
+                    <small>
+                      입력한 이름과 조리법으로 식약처·USDA 공식 영양 DB를
+                      검색합니다.
+                    </small>
                   </div>
+                  {(manualFoodResults.length > 0 ||
+                    manualFoodSearchDone) && (
+                    <div
+                      className="search-results manual-food-results"
+                      aria-live="polite"
+                    >
+                      {manualFoodResults.map((food) => (
+                        <button
+                          className="food-result"
+                          type="button"
+                          key={food.id}
+                          onClick={() => loadFoodResult(food)}
+                        >
+                          <span>
+                            <strong>{food.name}</strong>
+                            <span>
+                              {food.maker ? `${food.maker} · ` : ""}
+                              {food.servingAmount}
+                              {food.servingUnit} · {food.sourceLabel}
+                            </span>
+                          </span>
+                          <span className="result-nutrition">
+                            <strong>{Math.round(food.calories)} kcal</strong>
+                            <small>
+                              탄 {food.carbs.toFixed(1)} · 단{" "}
+                              {food.protein.toFixed(1)} · 지{" "}
+                              {food.fat.toFixed(1)}g
+                            </small>
+                          </span>
+                        </button>
+                      ))}
+                      {manualFoodSearchDone &&
+                        manualFoodResults.length === 0 && (
+                          <div className="notice">
+                            일치하는 공식 DB 항목이 없습니다. 음식 이름과 조리법을
+                            조금 다르게 입력해보세요.
+                          </div>
+                        )}
+                    </div>
+                  )}
                   <div className="field-row">
                     <div className="field">
                       <label htmlFor="serving-amount">섭취량</label>
@@ -2717,7 +2866,7 @@ export function NutritionDashboard({
                         inputMode="decimal"
                         value={manual.servingAmount}
                         onChange={(event) =>
-                          setManual({ ...manual, servingAmount: event.target.value })
+                          updateManualServingAmount(event.target.value)
                         }
                       />
                     </div>
@@ -2726,9 +2875,10 @@ export function NutritionDashboard({
                       <input
                         id="serving-unit"
                         value={manual.servingUnit}
-                        onChange={(event) =>
-                          setManual({ ...manual, servingUnit: event.target.value })
-                        }
+                        onChange={(event) => {
+                          setManual({ ...manual, servingUnit: event.target.value });
+                          setLoadedFoodResult(null);
+                        }}
                       />
                     </div>
                   </div>
