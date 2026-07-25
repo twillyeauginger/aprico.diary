@@ -81,6 +81,7 @@ type AnalysisDraft = {
   name: string;
   amountMode: "percent" | "grams";
   amount: string;
+  savedFoodId?: string;
 };
 
 export type MealInput = Omit<MealRecord, "id" | "demo">;
@@ -481,6 +482,7 @@ export function NutritionDashboard({
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [analysisDrafts, setAnalysisDrafts] = useState<AnalysisDraft[]>([]);
+  const [bulkPercentPrompt, setBulkPercentPrompt] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<
     | { kind: "meal"; item: MealRecord }
     | { kind: "savedFood"; item: SavedFood }
@@ -690,6 +692,7 @@ export function NutritionDashboard({
     setModalOpen(false);
     setAnalysis(null);
     setAnalysisDrafts([]);
+    setBulkPercentPrompt(null);
     setPhotoFile(null);
     if (photoPreview) URL.revokeObjectURL(photoPreview);
     setPhotoPreview("");
@@ -932,6 +935,7 @@ export function NutritionDashboard({
     setPhotoPreview(URL.createObjectURL(file));
     setAnalysis(null);
     setAnalysisDrafts([]);
+    setBulkPercentPrompt(null);
     setPhotoDate(selectedDate);
     setPhotoTime("");
     setPhotoDateSource("selected");
@@ -965,8 +969,8 @@ export function NutritionDashboard({
       setAnalysisDrafts(
         result.items.map((item) => ({
           name: item.name,
-          amountMode: item.portionGrams ? "grams" : "percent",
-          amount: item.portionGrams ? String(item.portionGrams) : "100",
+          amountMode: "percent",
+          amount: "100",
         })),
       );
     } catch (error) {
@@ -978,6 +982,47 @@ export function NutritionDashboard({
     } finally {
       setAnalyzing(false);
     }
+  }
+
+  function replaceAnalysisItemFromDb(index: number, foodId: string) {
+    const food = savedFoods.find((item) => String(item.id) === foodId);
+    if (!food) return;
+    setAnalysis((current) =>
+      current
+        ? {
+            ...current,
+            items: current.items.map((item, itemIndex) =>
+              itemIndex === index
+                ? {
+                    ...item,
+                    name: food.name,
+                    portionGrams:
+                      food.servingUnit.toLocaleLowerCase() === "g"
+                        ? food.servingAmount
+                        : null,
+                    portionText: `${food.servingAmount}${food.servingUnit}`,
+                    nutrition: {
+                      calories: food.calories,
+                      carbs: food.carbs,
+                      protein: food.protein,
+                      fat: food.fat,
+                      sugar: food.sugar,
+                      sodium: food.sodium,
+                      fiber: food.fiber,
+                    },
+                  }
+                : item,
+            ),
+          }
+        : current,
+    );
+    setAnalysisDrafts((current) =>
+      current.map((draft, draftIndex) =>
+        draftIndex === index
+          ? { ...draft, name: food.name, savedFoodId: foodId }
+          : draft,
+      ),
+    );
   }
 
   async function confirmAnalysis() {
@@ -1007,9 +1052,11 @@ export function NutritionDashboard({
             mealTime: photoTime,
             mealType: "점심",
             foodName: draft.name.trim() || item.name,
-            sourceType: item.sourceType,
+            sourceType: draft.savedFoodId ? "manual" : item.sourceType,
             sourceLabel:
-              item.sourceType === "label"
+              draft.savedFoodId
+                ? "내 음식 DB"
+                : item.sourceType === "label"
                 ? "영양정보 사진 표시값"
                 : "GPT 사진 추정",
             servingAmount,
@@ -1692,6 +1739,24 @@ export function NutritionDashboard({
                         {analysis.items.map((item, index) => (
                           <div className="analysis-result" key={`${item.name}-${index}`}>
                             <div className="analysis-result-main">
+                              <label htmlFor={`analysis-db-${index}`}>
+                                내 음식 DB에서 바꾸기
+                              </label>
+                              <select
+                                id={`analysis-db-${index}`}
+                                className="analysis-db-select"
+                                value={analysisDrafts[index]?.savedFoodId ?? ""}
+                                onChange={(event) =>
+                                  replaceAnalysisItemFromDb(index, event.target.value)
+                                }
+                              >
+                                <option value="">사진 분석 결과 사용</option>
+                                {savedFoods.map((food) => (
+                                  <option key={food.id} value={String(food.id)}>
+                                    {food.name} · {food.servingAmount}{food.servingUnit}
+                                  </option>
+                                ))}
+                              </select>
                               <label htmlFor={`analysis-name-${index}`}>음식 이름</label>
                               <input
                                 id={`analysis-name-${index}`}
@@ -1742,13 +1807,24 @@ export function NutritionDashboard({
                                   type="number"
                                   value={analysisDrafts[index]?.amount ?? "100"}
                                   onChange={(event) =>
-                                    setAnalysisDrafts((current) =>
-                                      current.map((draft, draftIndex) =>
-                                        draftIndex === index
-                                          ? { ...draft, amount: event.target.value }
-                                          : draft,
-                                      ),
-                                    )
+                                    {
+                                      const value = event.target.value;
+                                      setAnalysisDrafts((current) =>
+                                        current.map((draft, draftIndex) =>
+                                          draftIndex === index
+                                            ? { ...draft, amount: value }
+                                            : draft,
+                                        ),
+                                      );
+                                      if (
+                                        index === 0 &&
+                                        (analysisDrafts[index]?.amountMode ?? "percent") ===
+                                          "percent" &&
+                                        value !== ""
+                                      ) {
+                                        setBulkPercentPrompt(value);
+                                      }
+                                    }
                                   }
                                 />
                                 <span>
@@ -1762,6 +1838,36 @@ export function NutritionDashboard({
                           </div>
                         ))}
                       </div>
+                      {bulkPercentPrompt !== null && analysis.items.length > 1 && (
+                        <div className="bulk-apply-prompt" role="status">
+                          <span>
+                            모든 음식에 {bulkPercentPrompt}%를 똑같이 적용할까요?
+                          </span>
+                          <div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAnalysisDrafts((current) =>
+                                  current.map((draft) => ({
+                                    ...draft,
+                                    amountMode: "percent",
+                                    amount: bulkPercentPrompt,
+                                  })),
+                                );
+                                setBulkPercentPrompt(null);
+                              }}
+                            >
+                              모두 적용
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setBulkPercentPrompt(null)}
+                            >
+                              개별 입력
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       <button
                         className="primary-button wide-button"
                         type="button"

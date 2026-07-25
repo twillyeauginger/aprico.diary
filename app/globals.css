@@ -450,15 +450,15 @@ button {
 }
 
 .daily-goal-label.carbs {
-  color: #2563eb;
+  color: #c62828;
 }
 
 .daily-goal-label.protein {
-  color: #047857;
+  color: #2563eb;
 }
 
 .daily-goal-label.fat {
-  color: #c2410c;
+  color: #8a6500;
 }
 
 .daily-goal-track {
@@ -476,15 +476,15 @@ button {
 }
 
 .daily-goal-fill.carbs {
-  background: #3b82f6;
+  background: #e5484d;
 }
 
 .daily-goal-fill.protein {
-  background: #10b981;
+  background: #3b82f6;
 }
 
 .daily-goal-fill.fat {
-  background: #f97316;
+  background: #f4c430;
 }
 
 .daily-goal-value {
@@ -573,15 +573,15 @@ button {
 }
 
 .macro-label.carbs {
-  color: #2563eb;
+  color: #c62828;
 }
 
 .macro-label.protein {
-  color: #047857;
+  color: #2563eb;
 }
 
 .macro-label.fat {
-  color: #c2410c;
+  color: #8a6500;
 }
 
 .macro-track {
@@ -599,15 +599,15 @@ button {
 }
 
 .macro-carbs {
-  background: #3b82f6;
+  background: #e5484d;
 }
 
 .macro-protein {
-  background: #10b981;
+  background: #3b82f6;
 }
 
 .macro-fat {
-  background: #f97316;
+  background: #f4c430;
 }
 
 .macro-row strong {
@@ -1527,6 +1527,18 @@ button {
   font-weight: 800;
 }
 
+.analysis-db-select {
+  width: 100%;
+  margin-bottom: 10px;
+  border: 1px solid var(--sage);
+  border-radius: 10px;
+  background: var(--sage-pale);
+  padding: 9px 10px;
+  color: var(--sage-dark);
+  font-size: 10px;
+  font-weight: 800;
+}
+
 .analysis-result p {
   margin: 7px 0 0;
   color: var(--muted);
@@ -1561,6 +1573,43 @@ button {
   color: var(--muted);
   font-size: 10px;
   font-weight: 800;
+}
+
+.bulk-apply-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0;
+  border: 1px solid #b7c9ba;
+  border-radius: 15px;
+  background: var(--sage-pale);
+  padding: 12px 14px;
+  color: var(--sage-dark);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.bulk-apply-prompt > div {
+  display: flex;
+  gap: 7px;
+}
+
+.bulk-apply-prompt button {
+  border: 1px solid var(--sage);
+  border-radius: 9px;
+  background: var(--white);
+  padding: 7px 10px;
+  color: var(--sage-dark);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.bulk-apply-prompt button:first-child {
+  background: var(--sage-dark);
+  color: white;
 }
 
 .confidence {
@@ -1758,6 +1807,11 @@ button {
 
   .consumed-amount label {
     grid-column: 1 / -1;
+  }
+
+  .bulk-apply-prompt {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .food-list-search {
