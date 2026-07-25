@@ -415,6 +415,12 @@ function displayDate(key: string) {
   }).format(date);
 }
 
+function formatMinutes(minutes: number) {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(
+    minutes % 60,
+  ).padStart(2, "0")}`;
+}
+
 export function NutritionDashboard({
   client = legacyNutritionClient,
   userEmail,
@@ -435,8 +441,10 @@ export function NutritionDashboard({
   const [meals, setMeals] = useState<MealRecord[]>([]);
   const [isDemo, setIsDemo] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"search" | "photo" | "manual">(
-    "search",
+  const [activeTab, setActiveTab] = useState<
+    "saved" | "search" | "photo" | "manual"
+  >(
+    "saved",
   );
   const [manual, setManual] = useState(emptyManual(selectedDate));
   const [editingMeal, setEditingMeal] = useState<MealRecord | null>(null);
@@ -447,6 +455,7 @@ export function NutritionDashboard({
   const [foodListQuery, setFoodListQuery] = useState("");
   const [savedFoods, setSavedFoods] = useState<SavedFood[]>([]);
   const [savedFoodsLoading, setSavedFoodsLoading] = useState(false);
+  const [savedFoodQuery, setSavedFoodQuery] = useState("");
   const [savedFoodEditor, setSavedFoodEditor] = useState<SavedFood | "new" | null>(
     null,
   );
@@ -465,6 +474,11 @@ export function NutritionDashboard({
   );
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<
+    | { kind: "meal"; item: MealRecord }
+    | { kind: "savedFood"; item: SavedFood }
+    | null
+  >(null);
   const [toast, setToast] = useState("");
 
   useEffect(() => {
@@ -519,7 +533,7 @@ export function NutritionDashboard({
   }, [activeView, client]);
 
   useEffect(() => {
-    if (activeView !== "foodDb") return;
+    if (activeView !== "foodDb" && !modalOpen) return;
     let cancelled = false;
     client
       .listSavedFoods()
@@ -541,7 +555,7 @@ export function NutritionDashboard({
     return () => {
       cancelled = true;
     };
-  }, [activeView, client]);
+  }, [activeView, client, modalOpen]);
 
   useEffect(() => {
     if (!toast) return;
@@ -598,7 +612,25 @@ export function NutritionDashboard({
       type,
       count: actualMeals.filter((meal) => meal.mealType === type).length,
     }));
-    return { dayCount, dailyTotals, totals, mealTypes };
+    const mealTimes = ["아침", "점심", "저녁", "간식"].map((type) => {
+      const minutes = actualMeals
+        .filter((meal) => meal.mealType === type && meal.mealTime)
+        .map((meal) => {
+          const [hour, minute] = (meal.mealTime ?? "").split(":").map(Number);
+          return hour * 60 + minute;
+        })
+        .filter(Number.isFinite);
+      return {
+        type,
+        count: minutes.length,
+        averageMinutes: minutes.length
+          ? Math.round(minutes.reduce((sum, value) => sum + value, 0) / minutes.length)
+          : null,
+        earliestMinutes: minutes.length ? Math.min(...minutes) : null,
+        latestMinutes: minutes.length ? Math.max(...minutes) : null,
+      };
+    });
+    return { dayCount, dailyTotals, totals, mealTypes, mealTimes };
   }, [meals]);
 
   const filteredAllMeals = useMemo(() => {
@@ -621,10 +653,30 @@ export function NutritionDashboard({
     setToast(message);
   }
 
-  function openAdd(tab: "search" | "photo" | "manual" = "search") {
+  function openAdd(
+    tab: "saved" | "search" | "photo" | "manual" = "saved",
+  ) {
     setActiveTab(tab);
+    setSavedFoodsLoading(true);
     setModalOpen(true);
     setManual(emptyManual(selectedDate));
+  }
+
+  function loadSavedFood(food: SavedFood) {
+    setManual({
+      ...emptyManual(selectedDate),
+      foodName: food.name,
+      servingAmount: String(food.servingAmount),
+      servingUnit: food.servingUnit,
+      calories: String(food.calories),
+      carbs: String(food.carbs),
+      protein: String(food.protein),
+      fat: String(food.fat),
+      sugar: String(food.sugar),
+      sodium: String(food.sodium),
+      fiber: String(food.fiber),
+    });
+    setActiveTab("manual");
   }
 
   function closeModal() {
@@ -960,6 +1012,17 @@ export function NutritionDashboard({
     }
   }
 
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    if (target.kind === "meal") {
+      await deleteMeal(target.item);
+    } else {
+      await deleteSavedFood(target.item);
+    }
+  }
+
   function changeMonth(offset: number) {
     setViewMonth(
       (current) => new Date(current.getFullYear(), current.getMonth() + offset, 1),
@@ -979,18 +1042,6 @@ export function NutritionDashboard({
             onClick={() => setActiveView("calendar")}
           >
             캘린더
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveView("calendar");
-              setViewMonth(new Date(today.getFullYear(), today.getMonth(), 1));
-              setSelectedDate(dateKey(today));
-              openAdd();
-              setManual(emptyManual(dateKey(today)));
-            }}
-          >
-            오늘 기록
           </button>
           <button
             className={activeView === "foods" ? "active" : ""}
@@ -1293,7 +1344,7 @@ export function NutritionDashboard({
                       className="delete-meal"
                       type="button"
                       aria-label={`${meal.foodName} 삭제`}
-                      onClick={() => deleteMeal(meal)}
+                      onClick={() => setDeleteTarget({ kind: "meal", item: meal })}
                     >
                       ×
                     </button>
@@ -1335,7 +1386,7 @@ export function NutritionDashboard({
           loading={savedFoodsLoading}
           onAdd={() => openSavedFoodEditor()}
           onAddToMeal={addSavedFoodToMeal}
-          onDelete={deleteSavedFood}
+          onDelete={(food) => setDeleteTarget({ kind: "savedFood", item: food })}
           onEdit={openSavedFoodEditor}
         />
       )}
@@ -1379,6 +1430,15 @@ export function NutritionDashboard({
             </div>
             <div className="tabs" role="tablist" aria-label="음식 입력 방법">
               <button
+                className={activeTab === "saved" ? "active" : ""}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "saved"}
+                onClick={() => setActiveTab("saved")}
+              >
+                내 음식 DB
+              </button>
+              <button
                 className={activeTab === "search" ? "active" : ""}
                 type="button"
                 role="tab"
@@ -1408,6 +1468,57 @@ export function NutritionDashboard({
             </div>
 
             <div className="tab-content">
+              {activeTab === "saved" && (
+                <>
+                  <div className="search-box">
+                    <input
+                      className="search-input"
+                      type="search"
+                      aria-label="내 음식 DB 검색"
+                      placeholder="저장한 음식 검색"
+                      value={savedFoodQuery}
+                      onChange={(event) => setSavedFoodQuery(event.target.value)}
+                    />
+                  </div>
+                  <p className="helper-note">
+                    음식을 불러온 뒤 날짜, 시간, 식사 구분과 섭취량을 확인하고 기록합니다.
+                  </p>
+                  <div className="search-results">
+                    {savedFoodsLoading ? (
+                      <Skeleton count={3} height={58} />
+                    ) : savedFoods
+                        .filter((food) =>
+                          food.name
+                            .toLocaleLowerCase("ko")
+                            .includes(savedFoodQuery.trim().toLocaleLowerCase("ko")),
+                        )
+                        .map((food) => (
+                          <button
+                            className="food-result"
+                            type="button"
+                            key={food.id}
+                            onClick={() => loadSavedFood(food)}
+                          >
+                            <span>
+                              <strong>{food.name}</strong>
+                              <span>
+                                {food.servingAmount}{food.servingUnit} · 탄 {Math.round(food.carbs)}g ·
+                                단 {Math.round(food.protein)}g · 지 {Math.round(food.fat)}g
+                              </span>
+                            </span>
+                            <span className="result-kcal">
+                              {Math.round(food.calories)} kcal
+                            </span>
+                          </button>
+                        ))}
+                    {!savedFoodsLoading && savedFoods.length === 0 && (
+                      <div className="notice">
+                        내 음식 DB가 비어 있어요. 상단 메뉴의 ‘내 음식 DB’에서 먼저 등록해주세요.
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
               {activeTab === "search" && (
                 <>
                   <form className="search-box" onSubmit={handleSearch}>
@@ -1923,6 +2034,51 @@ export function NutritionDashboard({
           </section>
         </div>
       )}
+      {deleteTarget && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) setDeleteTarget(null);
+          }}
+        >
+          <section
+            aria-labelledby="delete-confirm-title"
+            aria-modal="true"
+            className="modal confirm-modal"
+            role="alertdialog"
+          >
+            <div className="modal-header">
+              <div>
+                <h2 id="delete-confirm-title">
+                  {deleteTarget.kind === "meal" ? "식사 기록을 삭제할까요?" : "저장한 음식을 삭제할까요?"}
+                </h2>
+                <p>
+                  ‘{deleteTarget.kind === "meal"
+                    ? deleteTarget.item.foodName
+                    : deleteTarget.item.name}’을 삭제하면 되돌릴 수 없습니다.
+                </p>
+              </div>
+            </div>
+            <div className="confirm-actions">
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+              >
+                취소
+              </button>
+              <button
+                className="danger-button"
+                type="button"
+                onClick={() => void confirmDelete()}
+              >
+                삭제
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
       {toast && (
         <div className="toast" role="status">
           {toast}
@@ -1945,13 +2101,17 @@ function FoodListPanel({
   onQueryChange: (query: string) => void;
   onEdit: (meal: MealRecord) => void;
 }) {
+  const macroMax = Math.max(
+    10,
+    ...meals.flatMap((meal) => [meal.carbs, meal.protein, meal.fat]),
+  );
   return (
     <section className="food-list-panel" aria-labelledby="food-list-title">
       <div className="food-list-heading">
         <div>
           <p className="eyebrow">내 식사 기록</p>
           <h2 id="food-list-title">실제로 먹은 음식</h2>
-          <p>영양 비율과 밀도를 비교해 어떤 음식이 나에게 잘 맞았는지 살펴보세요.</p>
+          <p>같은 g 척도의 막대로 실제 영양소 양과 밀도를 비교해보세요.</p>
         </div>
         <label className="food-list-search">
           <span className="sr-only">음식 검색</span>
@@ -2012,6 +2172,7 @@ function FoodListPanel({
                       carbs={meal.carbs}
                       protein={meal.protein}
                       fat={meal.fat}
+                      maxGrams={macroMax}
                     />
                   </td>
                   <td>
@@ -2054,29 +2215,32 @@ function MacroBar({
   carbs,
   protein,
   fat,
+  maxGrams,
 }: {
   carbs: number;
   protein: number;
   fat: number;
+  maxGrams: number;
 }) {
-  const calories = carbs * 4 + protein * 4 + fat * 9;
-  const widths = {
-    carbs: (carbs * 4 * 100) / Math.max(calories, 1),
-    protein: (protein * 4 * 100) / Math.max(calories, 1),
-    fat: (fat * 9 * 100) / Math.max(calories, 1),
-  };
+  const macros = [
+    { key: "carbs", label: "탄", value: carbs },
+    { key: "protein", label: "단", value: protein },
+    { key: "fat", label: "지", value: fat },
+  ];
   return (
     <div className="macro-visual" aria-label={`탄수화물 ${carbs}g, 단백질 ${protein}g, 지방 ${fat}g`}>
-      <div className="macro-bar" aria-hidden="true">
-        <span className="macro-carbs" style={{ width: `${widths.carbs}%` }} />
-        <span className="macro-protein" style={{ width: `${widths.protein}%` }} />
-        <span className="macro-fat" style={{ width: `${widths.fat}%` }} />
-      </div>
-      <div className="macro-values">
-        <span className="carbs">탄 {Math.round(carbs)}g</span>
-        <span className="protein">단 {Math.round(protein)}g</span>
-        <span className="fat">지 {Math.round(fat)}g</span>
-      </div>
+      {macros.map((macro) => (
+        <div className="macro-row" key={macro.key}>
+          <span className={`macro-label ${macro.key}`}>{macro.label}</span>
+          <span className="macro-track" aria-hidden="true">
+            <span
+              className={`macro-fill macro-${macro.key}`}
+              style={{ width: `${Math.min(100, (macro.value / maxGrams) * 100)}%` }}
+            />
+          </span>
+          <strong>{Math.round(macro.value)}g</strong>
+        </div>
+      ))}
     </div>
   );
 }
@@ -2096,6 +2260,10 @@ function SavedFoodPanel({
   onDelete: (food: SavedFood) => void;
   onEdit: (food: SavedFood) => void;
 }) {
+  const macroMax = Math.max(
+    10,
+    ...foods.flatMap((food) => [food.carbs, food.protein, food.fat]),
+  );
   return (
     <section className="food-list-panel" aria-labelledby="saved-food-title">
       <div className="food-list-heading">
@@ -2130,7 +2298,12 @@ function SavedFoodPanel({
                 </div>
                 <strong>{Math.round(food.calories)}<small> kcal</small></strong>
               </div>
-              <MacroBar carbs={food.carbs} protein={food.protein} fat={food.fat} />
+              <MacroBar
+                carbs={food.carbs}
+                protein={food.protein}
+                fat={food.fat}
+                maxGrams={macroMax}
+              />
               <div className="saved-food-actions">
                 <button type="button" onClick={() => onAddToMeal(food)}>
                   선택한 날짜에 기록
@@ -2157,6 +2330,13 @@ function InsightsPanel({
     dailyTotals: Array<ReturnType<typeof sumNutrition> & { date: string }>;
     totals: ReturnType<typeof sumNutrition>;
     mealTypes: Array<{ type: string; count: number }>;
+    mealTimes: Array<{
+      type: string;
+      count: number;
+      averageMinutes: number | null;
+      earliestMinutes: number | null;
+      latestMinutes: number | null;
+    }>;
   };
   onChangeMonth: (offset: number) => void;
 }) {
@@ -2261,6 +2441,35 @@ function InsightsPanel({
                   </div>
                 );
               })}
+            </div>
+          </article>
+          <article className="insight-card meal-time-card">
+            <div>
+              <span className="insight-label">평균 식사 시간</span>
+              <p>시간이 입력된 기록을 기준으로 식사 리듬을 보여줍니다.</p>
+            </div>
+            <div className="meal-time-list">
+              {insights.mealTimes.map((item) => (
+                <div className="meal-time-row" key={item.type}>
+                  <span>{item.type}</span>
+                  {item.averageMinutes === null ? (
+                    <small>시간 기록 없음</small>
+                  ) : (
+                    <>
+                      <div className="time-track" aria-hidden="true">
+                        <span
+                          style={{ left: `${(item.averageMinutes / 1440) * 100}%` }}
+                        />
+                      </div>
+                      <strong>{formatMinutes(item.averageMinutes)}</strong>
+                      <small>
+                        {item.count}회 · {formatMinutes(item.earliestMinutes!)}–
+                        {formatMinutes(item.latestMinutes!)}
+                      </small>
+                    </>
+                  )}
+                </div>
+              ))}
             </div>
           </article>
         </div>
