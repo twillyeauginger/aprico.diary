@@ -9,10 +9,12 @@ import type {
   MealInput,
   MealRecord,
   NutritionClient,
+  NutritionGoals,
   SavedFood,
   SavedFoodInput,
   SourceType,
 } from "../app/nutrition-dashboard";
+import { DEFAULT_GOALS } from "../app/nutrition-dashboard";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim() ?? "";
 const publishableKey =
@@ -286,6 +288,46 @@ export function createSupabaseNutritionClient(
     async deleteSavedFood(id) {
       const { error } = await client.from("saved_foods").delete().eq("id", id);
       if (error) throw new Error(`음식을 삭제하지 못했습니다: ${error.message}`);
+    },
+
+    async getNutritionGoals() {
+      const { data, error } = await client
+        .from("nutrition_goals")
+        .select("*")
+        .maybeSingle();
+      if (error) throw new Error(`영양 목표를 불러오지 못했습니다: ${error.message}`);
+      if (!data) return DEFAULT_GOALS;
+      const row = data as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.entries(DEFAULT_GOALS).map(([key, fallback]) => [
+          key,
+          key === "goalType"
+            ? String(row.goal_type ?? fallback)
+            : Number(row[key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)] ?? fallback),
+        ]),
+      ) as NutritionGoals;
+    },
+
+    async updateNutritionGoals(goals) {
+      const user = await requireUser(client);
+      const values = {
+        user_id: user.id,
+        goal_type: goals.goalType,
+        ...Object.fromEntries(
+          Object.entries(goals)
+            .filter(([key]) => key !== "goalType")
+            .map(([key, value]) => [
+              key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
+              value,
+            ]),
+        ),
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await client
+        .from("nutrition_goals")
+        .upsert(values, { onConflict: "user_id" });
+      if (error) throw new Error(`영양 목표를 저장하지 못했습니다: ${error.message}`);
+      return goals;
     },
 
     async searchFoods(query) {

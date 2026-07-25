@@ -102,18 +102,44 @@ export type SavedFood = {
 
 export type SavedFoodInput = Omit<SavedFood, "id">;
 
-type NutritionGoals = {
+export type NutritionGoals = {
+  goalType: string;
   calories: number;
   carbs: number;
   protein: number;
   fat: number;
+  exerciseCaloriesMin: number;
+  exerciseCaloriesMax: number;
+  exerciseCarbsMin: number;
+  exerciseCarbsMax: number;
+  exerciseProteinMin: number;
+  exerciseProteinMax: number;
+  exerciseFat: number;
+  restCalories: number;
+  restCarbsMin: number;
+  restCarbsMax: number;
+  restProtein: number;
+  restFat: number;
 };
 
-const DEFAULT_GOALS: NutritionGoals = {
-  calories: 2000,
-  carbs: 250,
-  protein: 100,
-  fat: 65,
+export const DEFAULT_GOALS: NutritionGoals = {
+  goalType: "체중 유지 및 완만한 체지방 감량",
+  calories: 1650,
+  carbs: 215,
+  protein: 85,
+  fat: 50,
+  exerciseCaloriesMin: 1700,
+  exerciseCaloriesMax: 1750,
+  exerciseCarbsMin: 225,
+  exerciseCarbsMax: 240,
+  exerciseProteinMin: 85,
+  exerciseProteinMax: 90,
+  exerciseFat: 50,
+  restCalories: 1600,
+  restCarbsMin: 195,
+  restCarbsMax: 205,
+  restProtein: 85,
+  restFat: 50,
 };
 
 export type NutritionClient = {
@@ -129,6 +155,8 @@ export type NutritionClient = {
     payload: SavedFoodInput,
   ): Promise<SavedFood>;
   deleteSavedFood(id: SavedFood["id"]): Promise<void>;
+  getNutritionGoals(): Promise<NutritionGoals>;
+  updateNutritionGoals(goals: NutritionGoals): Promise<NutritionGoals>;
   searchFoods(query: string): Promise<FoodResult[]>;
   analyzePhoto(file: File): Promise<AnalysisResult>;
 };
@@ -209,6 +237,22 @@ const legacyNutritionClient: NutritionClient = {
   async deleteSavedFood(id) {
     const response = await fetch(`/api/saved-foods/${id}`, { method: "DELETE" });
     if (!response.ok) throw new Error("삭제하지 못했습니다.");
+  },
+  async getNutritionGoals() {
+    const response = await fetch("/api/profile-goals");
+    if (!response.ok) return DEFAULT_GOALS;
+    const body = (await response.json()) as { goals?: NutritionGoals };
+    return body.goals ?? DEFAULT_GOALS;
+  },
+  async updateNutritionGoals(goals) {
+    const response = await fetch("/api/profile-goals", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(goals),
+    });
+    const body = (await response.json()) as { goals?: NutritionGoals; error?: string };
+    if (!response.ok || !body.goals) throw new Error(body.error ?? "목표를 저장하지 못했습니다.");
+    return body.goals;
   },
   async searchFoods(query) {
     const response = await fetch(`/api/foods?q=${encodeURIComponent(query)}`);
@@ -459,18 +503,8 @@ export function NutritionDashboard({
   const [activeView, setActiveView] = useState<
     "calendar" | "foods" | "foodDb" | "insights" | "profile"
   >("calendar");
-  const [nutritionGoals, setNutritionGoals] = useState<NutritionGoals>(() => {
-    if (typeof window === "undefined") return DEFAULT_GOALS;
-    const storageKey = `nutrition-goals:${userEmail ?? "local"}`;
-    const stored = window.localStorage.getItem(storageKey);
-    if (!stored) return DEFAULT_GOALS;
-    try {
-      return { ...DEFAULT_GOALS, ...JSON.parse(stored) };
-    } catch {
-      window.localStorage.removeItem(storageKey);
-      return DEFAULT_GOALS;
-    }
-  });
+  const [nutritionGoals, setNutritionGoals] =
+    useState<NutritionGoals>(DEFAULT_GOALS);
   const [meals, setMeals] = useState<MealRecord[]>([]);
   const [isDemo, setIsDemo] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -520,11 +554,17 @@ export function NutritionDashboard({
   const [toast, setToast] = useState("");
 
   useEffect(() => {
-    window.localStorage.setItem(
-      `nutrition-goals:${userEmail ?? "local"}`,
-      JSON.stringify(nutritionGoals),
-    );
-  }, [nutritionGoals, userEmail]);
+    let cancelled = false;
+    client
+      .getNutritionGoals()
+      .then((goals) => {
+        if (!cancelled) setNutritionGoals({ ...DEFAULT_GOALS, ...goals });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1545,9 +1585,14 @@ export function NutritionDashboard({
         <ProfilePanel
           email={userEmail}
           goals={nutritionGoals}
-          onSave={(goals) => {
-            setNutritionGoals(goals);
-            showToast("하루 영양 목표를 저장했어요.");
+          onSave={async (goals) => {
+            try {
+              const saved = await client.updateNutritionGoals(goals);
+              setNutritionGoals(saved);
+              showToast("하루 영양 목표를 저장했어요.");
+            } catch (error) {
+              showToast(error instanceof Error ? error.message : "목표를 저장하지 못했습니다.");
+            }
           }}
         />
       )}
@@ -2559,7 +2604,7 @@ function ProfilePanel({
 }: {
   email?: string;
   goals: NutritionGoals;
-  onSave: (goals: NutritionGoals) => void;
+  onSave: (goals: NutritionGoals) => void | Promise<void>;
 }) {
   const [form, setForm] = useState(goals);
   return (
@@ -2569,6 +2614,14 @@ function ProfilePanel({
         <h2 id="profile-title">마이페이지</h2>
         <p>{email ?? "내 계정"} · 하루 권장 섭취 목표를 관리합니다.</p>
       </div>
+      <div className="goal-type-field">
+        <label htmlFor="goal-type">목표 유형</label>
+        <input
+          id="goal-type"
+          value={form.goalType}
+          onChange={(event) => setForm({ ...form, goalType: event.target.value })}
+        />
+      </div>
       <form
         className="goal-form"
         onSubmit={(event) => {
@@ -2576,6 +2629,7 @@ function ProfilePanel({
           onSave(form);
         }}
       >
+        <h3 className="goal-section-title">나의 영양 목표</h3>
         {[
           ["calories", "칼로리", "kcal", "하루 에너지 목표"],
           ["carbs", "탄수화물", "g", "하루 탄수화물 목표"],
@@ -2602,6 +2656,57 @@ function ProfilePanel({
             </div>
           </label>
         ))}
+        <div className="reference-goals">
+          {[
+            {
+              title: "운동일 참고 목표",
+              fields: [
+                ["exerciseCaloriesMin", "칼로리 최소", "kcal"],
+                ["exerciseCaloriesMax", "칼로리 최대", "kcal"],
+                ["exerciseCarbsMin", "탄수화물 최소", "g"],
+                ["exerciseCarbsMax", "탄수화물 최대", "g"],
+                ["exerciseProteinMin", "단백질 최소", "g"],
+                ["exerciseProteinMax", "단백질 최대", "g"],
+                ["exerciseFat", "지방", "g"],
+              ],
+            },
+            {
+              title: "휴식일 참고 목표",
+              fields: [
+                ["restCalories", "칼로리", "kcal"],
+                ["restCarbsMin", "탄수화물 최소", "g"],
+                ["restCarbsMax", "탄수화물 최대", "g"],
+                ["restProtein", "단백질", "g"],
+                ["restFat", "지방", "g"],
+              ],
+            },
+          ].map((section) => (
+            <section className="reference-goal-card" key={section.title}>
+              <h3>{section.title}</h3>
+              <div>
+                {section.fields.map(([key, label, unit]) => (
+                  <label key={key}>
+                    <span>{label}</span>
+                    <div>
+                      <input
+                        min="1"
+                        type="number"
+                        value={form[key as keyof NutritionGoals]}
+                        onChange={(event) =>
+                          setForm({
+                            ...form,
+                            [key]: Math.max(1, Number(event.target.value) || 1),
+                          })
+                        }
+                      />
+                      <small>{unit}</small>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
         <button className="primary-button wide-button" type="submit">
           하루 목표 저장
         </button>

@@ -97,6 +97,13 @@ export function ensureSchema() {
         CREATE INDEX IF NOT EXISTS analysis_runs_photo_idx
         ON analysis_runs (photo_id)
       `),
+      database.prepare(`
+        CREATE TABLE IF NOT EXISTS nutrition_goals (
+          id INTEGER PRIMARY KEY,
+          goals_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `),
     ])
     .then(() => undefined)
     .catch((error) => {

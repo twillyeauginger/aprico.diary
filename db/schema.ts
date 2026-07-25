@@ -68,3 +68,9 @@ export const analysisRuns = sqliteTable(
   },
   (table) => [index("analysis_runs_photo_idx").on(table.photoId)],
 );
+
+export const nutritionGoals = sqliteTable("nutrition_goals", {
+  id: integer("id").primaryKey(),
+  goalsJson: text("goals_json").notNull(),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
