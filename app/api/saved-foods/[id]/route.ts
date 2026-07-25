@@ -24,6 +24,8 @@ export async function PUT(
       .update(savedFoods)
       .set({
         name: name.slice(0, 120),
+        sourceType: String(body.sourceType ?? "manual").slice(0, 30),
+        sourceLabel: String(body.sourceLabel ?? "직접 등록").slice(0, 80),
         servingAmount: asNumber(body.servingAmount, 1),
         servingUnit: String(body.servingUnit ?? "인분").slice(0, 20),
         calories: asNumber(body.calories),

@@ -57,6 +57,8 @@ type MealRow = {
 type SavedFoodRow = {
   id: string;
   name: string;
+  source_type: SourceType;
+  source_label: string;
   serving_amount: number;
   serving_unit: string;
   calories: number;
@@ -72,6 +74,8 @@ function rowToSavedFood(row: SavedFoodRow): SavedFood {
   return {
     id: row.id,
     name: row.name,
+    sourceType: row.source_type ?? "manual",
+    sourceLabel: row.source_label ?? "직접 등록",
     servingAmount: Number(row.serving_amount),
     servingUnit: row.serving_unit,
     calories: Number(row.calories),
@@ -87,6 +91,8 @@ function rowToSavedFood(row: SavedFoodRow): SavedFood {
 function savedFoodValues(payload: SavedFoodInput) {
   return {
     name: payload.name,
+    source_type: payload.sourceType,
+    source_label: payload.sourceLabel,
     serving_amount: payload.servingAmount,
     serving_unit: payload.servingUnit,
     calories: payload.calories,
@@ -241,7 +247,7 @@ export function createSupabaseNutritionClient(
           sodium: payload.sodium,
           fiber: payload.fiber,
           confidence: null,
-          photo_path: null,
+          photo_path: payload.photoId ?? null,
         })
         .eq("id", id)
         .select("*")

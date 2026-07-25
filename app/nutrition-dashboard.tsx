@@ -89,6 +89,8 @@ export type MealInput = Omit<MealRecord, "id" | "demo">;
 export type SavedFood = {
   id: number | string;
   name: string;
+  sourceType: SourceType;
+  sourceLabel: string;
   servingAmount: number;
   servingUnit: string;
   calories: number;
@@ -466,6 +468,69 @@ function emptyManual(selectedDate: string) {
     sodium: "",
     fiber: "",
   };
+}
+
+const EDIT_NUTRIENT_KEYS = [
+  "calories",
+  "carbs",
+  "protein",
+  "fat",
+  "sugar",
+  "sodium",
+  "fiber",
+] as const;
+
+function servingMeasure(amount: number, unit: string) {
+  const normalized = unit.trim().toLocaleLowerCase().replaceAll(" ", "");
+  const conversions: Record<string, { dimension: string; multiplier: number }> = {
+    mg: { dimension: "weight", multiplier: 0.001 },
+    밀리그램: { dimension: "weight", multiplier: 0.001 },
+    g: { dimension: "weight", multiplier: 1 },
+    그램: { dimension: "weight", multiplier: 1 },
+    kg: { dimension: "weight", multiplier: 1000 },
+    킬로그램: { dimension: "weight", multiplier: 1000 },
+    ml: { dimension: "volume", multiplier: 1 },
+    밀리리터: { dimension: "volume", multiplier: 1 },
+    l: { dimension: "volume", multiplier: 1000 },
+    "ℓ": { dimension: "volume", multiplier: 1000 },
+    리터: { dimension: "volume", multiplier: 1000 },
+  };
+  const conversion = conversions[normalized];
+  return conversion
+    ? {
+        dimension: conversion.dimension,
+        value: amount * conversion.multiplier,
+      }
+    : { dimension: `unit:${normalized}`, value: amount };
+}
+
+function editServingMultiplier(
+  meal: Pick<MealRecord, "servingAmount" | "servingUnit">,
+  nextAmountText: string,
+  nextUnit: string,
+) {
+  const nextAmount = Number(nextAmountText);
+  const originalAmount = Number(meal.servingAmount);
+  if (
+    !Number.isFinite(nextAmount) ||
+    nextAmount < 0 ||
+    !Number.isFinite(originalAmount) ||
+    originalAmount <= 0
+  ) {
+    return null;
+  }
+
+  const original = servingMeasure(originalAmount, meal.servingUnit);
+  const next = servingMeasure(nextAmount, nextUnit);
+  if (original.dimension === next.dimension && original.value > 0) {
+    return next.value / original.value;
+  }
+  return nextAmount / originalAmount;
+}
+
+function formatScaledNutrition(value: number) {
+  const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
+  return String(rounded);
 }
 
 function emptySavedFood() {
@@ -1303,9 +1368,12 @@ export function NutritionDashboard({
         mealTime: manual.mealTime,
         mealType: manual.mealType,
         foodName: manual.foodName.trim(),
-        sourceType: loadedFoodResult?.sourceType ?? "manual",
+        sourceType:
+          loadedSavedFood?.sourceType ??
+          loadedFoodResult?.sourceType ??
+          "manual",
         sourceLabel: loadedSavedFood
-          ? "내 음식 DB"
+          ? `내 음식 DB · ${loadedSavedFood.sourceLabel}`
           : loadedFoodResult?.sourceLabel ?? "직접 입력",
         servingAmount: Number(manual.servingAmount) || 1,
         servingUnit: manual.servingUnit || "인분",
@@ -1342,9 +1410,39 @@ export function NutritionDashboard({
     });
   }
 
+  function updateEditServing(
+    changes: Partial<Pick<typeof editForm, "servingAmount" | "servingUnit">>,
+  ) {
+    setEditForm((current) => {
+      const servingAmount = changes.servingAmount ?? current.servingAmount;
+      const servingUnit = changes.servingUnit ?? current.servingUnit;
+      const next = { ...current, servingAmount, servingUnit };
+      if (!editingMeal) return next;
+
+      const multiplier = editServingMultiplier(
+        editingMeal,
+        servingAmount,
+        servingUnit,
+      );
+      if (multiplier === null) return next;
+
+      for (const key of EDIT_NUTRIENT_KEYS) {
+        next[key] = formatScaledNutrition(
+          Number(editingMeal[key] || 0) * multiplier,
+        );
+      }
+      return next;
+    });
+  }
+
   async function handleEditSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editingMeal || !editForm.foodName.trim()) return;
+    const servingAmount = Number(editForm.servingAmount);
+    if (!Number.isFinite(servingAmount) || servingAmount <= 0) {
+      showToast("섭취량은 0보다 큰 숫자로 입력해주세요.");
+      return;
+    }
     setUpdating(true);
     try {
       const updated = await client.updateMeal(editingMeal.id, {
@@ -1354,7 +1452,7 @@ export function NutritionDashboard({
         foodName: editForm.foodName.trim(),
         sourceType: "manual",
         sourceLabel: "사용자 수정",
-        servingAmount: Number(editForm.servingAmount) || 1,
+        servingAmount,
         servingUnit: editForm.servingUnit || "인분",
         calories: Number(editForm.calories) || 0,
         carbs: Number(editForm.carbs) || 0,
@@ -1363,6 +1461,7 @@ export function NutritionDashboard({
         sugar: Number(editForm.sugar) || 0,
         sodium: Number(editForm.sodium) || 0,
         fiber: Number(editForm.fiber) || 0,
+        photoId: editingMeal.photoId,
       });
       setMeals((current) =>
         current.map((meal) => (meal.id === updated.id ? updated : meal)),
@@ -1382,8 +1481,12 @@ export function NutritionDashboard({
   }
 
   function savedFoodPayload(): SavedFoodInput {
+    const existing =
+      savedFoodEditor && savedFoodEditor !== "new" ? savedFoodEditor : null;
     return {
       name: savedFoodForm.name.trim(),
+      sourceType: existing?.sourceType ?? "manual",
+      sourceLabel: existing?.sourceLabel ?? "직접 등록",
       servingAmount: Number(savedFoodForm.servingAmount) || 1,
       servingUnit: savedFoodForm.servingUnit || "인분",
       calories: Number(savedFoodForm.calories) || 0,
@@ -1414,6 +1517,33 @@ export function NutritionDashboard({
           }
         : emptySavedFood(),
     );
+  }
+
+  function updateSavedFoodServing(
+    changes: Partial<
+      Pick<typeof savedFoodForm, "servingAmount" | "servingUnit">
+    >,
+  ) {
+    setSavedFoodForm((current) => {
+      const servingAmount = changes.servingAmount ?? current.servingAmount;
+      const servingUnit = changes.servingUnit ?? current.servingUnit;
+      const next = { ...current, servingAmount, servingUnit };
+      if (!savedFoodEditor || savedFoodEditor === "new") return next;
+
+      const multiplier = editServingMultiplier(
+        savedFoodEditor,
+        servingAmount,
+        servingUnit,
+      );
+      if (multiplier === null) return next;
+
+      for (const key of EDIT_NUTRIENT_KEYS) {
+        next[key] = formatScaledNutrition(
+          Number(savedFoodEditor[key] || 0) * multiplier,
+        );
+      }
+      return next;
+    });
   }
 
   async function handleSavedFoodSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -1457,8 +1587,8 @@ export function NutritionDashboard({
         mealTime: new Date().toTimeString().slice(0, 5),
         mealType: "점심",
         foodName: food.name,
-        sourceType: "manual",
-        sourceLabel: "내 음식 DB",
+        sourceType: food.sourceType,
+        sourceLabel: `내 음식 DB · ${food.sourceLabel}`,
         servingAmount: food.servingAmount,
         servingUnit: food.servingUnit,
         calories: food.calories,
@@ -1681,6 +1811,11 @@ export function NutritionDashboard({
           amountMode: "percent" as const,
           amount: "100",
         };
+        const selectedSavedFood = draft.savedFoodId
+          ? savedFoods.find(
+              (food) => String(food.id) === String(draft.savedFoodId),
+            )
+          : undefined;
         const enteredAmount = Math.max(0, Number(draft.amount) || 0);
         if (enteredAmount === 0) continue;
         const ratio =
@@ -1699,10 +1834,10 @@ export function NutritionDashboard({
             mealTime: photoTime,
             mealType: mealTypeFromTime(photoTime),
             foodName: draft.name.trim() || item.name,
-            sourceType: draft.savedFoodId ? "manual" : item.sourceType,
+            sourceType: selectedSavedFood?.sourceType ?? item.sourceType,
             sourceLabel:
-              draft.savedFoodId
-                ? "내 음식 DB"
+              selectedSavedFood
+                ? `내 음식 DB · ${selectedSavedFood.sourceLabel}`
                 : item.sourceType === "label"
                 ? "영양정보 사진 표시값"
                 : "GPT 사진 추정",
@@ -1735,6 +1870,7 @@ export function NutritionDashboard({
     try {
       await client.deleteMeal(meal.id);
       setMeals((current) => current.filter((item) => item.id !== meal.id));
+      setAllMeals((current) => current.filter((item) => item.id !== meal.id));
       showToast("기록을 삭제했어요.");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "삭제하지 못했습니다.");
@@ -2232,6 +2368,7 @@ export function NutritionDashboard({
           goals={nutritionGoals}
           query={foodListQuery}
           onQueryChange={setFoodListQuery}
+          onDelete={(meal) => setDeleteTarget({ kind: "meal", item: meal })}
           onEdit={openEdit}
         />
       ) : activeView === "foodDb" ? (
@@ -2945,8 +3082,8 @@ export function NutritionDashboard({
           >
             <div className="modal-header">
               <div>
-                <h2 id="edit-food-title">직접 입력 기록 수정</h2>
-                <p>저장하면 기기 간 기록에도 바로 반영됩니다.</p>
+                <h2 id="edit-food-title">식사 기록 수정</h2>
+                <p>섭취량을 바꾸면 영양정보도 함께 계산됩니다.</p>
               </div>
               <button
                 className="close-button"
@@ -3012,10 +3149,13 @@ export function NutritionDashboard({
                   <label htmlFor="edit-serving-amount">섭취량</label>
                   <input
                     id="edit-serving-amount"
+                    type="number"
                     inputMode="decimal"
+                    min="0.01"
+                    step="any"
                     value={editForm.servingAmount}
                     onChange={(event) =>
-                      setEditForm({ ...editForm, servingAmount: event.target.value })
+                      updateEditServing({ servingAmount: event.target.value })
                     }
                   />
                 </div>
@@ -3025,11 +3165,16 @@ export function NutritionDashboard({
                     id="edit-serving-unit"
                     value={editForm.servingUnit}
                     onChange={(event) =>
-                      setEditForm({ ...editForm, servingUnit: event.target.value })
+                      updateEditServing({ servingUnit: event.target.value })
                     }
                   />
                 </div>
               </div>
+              <p className="edit-serving-helper">
+                처음 저장된 {editingMeal.servingAmount}
+                {editingMeal.servingUnit}을 기준으로 자동 계산합니다. g·kg,
+                mg·g, mL·L 단위도 환산됩니다.
+              </p>
               <div className="field-row">
                 {[
                   ["calories", "열량 (kcal)"],
@@ -3109,11 +3254,13 @@ export function NutritionDashboard({
                   <label htmlFor="saved-serving-amount">1회 섭취량</label>
                   <input
                     id="saved-serving-amount"
+                    type="number"
                     inputMode="decimal"
+                    min="0.01"
+                    step="any"
                     value={savedFoodForm.servingAmount}
                     onChange={(event) =>
-                      setSavedFoodForm({
-                        ...savedFoodForm,
+                      updateSavedFoodServing({
                         servingAmount: event.target.value,
                       })
                     }
@@ -3125,14 +3272,20 @@ export function NutritionDashboard({
                     id="saved-serving-unit"
                     value={savedFoodForm.servingUnit}
                     onChange={(event) =>
-                      setSavedFoodForm({
-                        ...savedFoodForm,
+                      updateSavedFoodServing({
                         servingUnit: event.target.value,
                       })
                     }
                   />
                 </div>
               </div>
+              {savedFoodEditor !== "new" && (
+                <p className="edit-serving-helper">
+                  처음 저장된 {savedFoodEditor.servingAmount}
+                  {savedFoodEditor.servingUnit}을 기준으로 영양정보를 자동
+                  계산합니다. 변경값은 과거 식사 기록에 적용되지 않습니다.
+                </p>
+              )}
               <div className="field-row">
                 {[
                   ["calories", "열량 (kcal)"],
@@ -3184,6 +3337,8 @@ export function NutritionDashboard({
                   ‘{deleteTarget.kind === "meal"
                     ? deleteTarget.item.foodName
                     : deleteTarget.item.name}’을 삭제하면 되돌릴 수 없습니다.
+                  {deleteTarget.kind === "savedFood" &&
+                    " 이미 저장된 식사 기록은 그대로 유지됩니다."}
                 </p>
               </div>
             </div>
@@ -3222,6 +3377,7 @@ function FoodListPanel({
   goals,
   query,
   onQueryChange,
+  onDelete,
   onEdit,
 }: {
   loading: boolean;
@@ -3230,6 +3386,7 @@ function FoodListPanel({
   goals: NutritionGoals;
   query: string;
   onQueryChange: (query: string) => void;
+  onDelete: (meal: MealRecord) => void;
   onEdit: (meal: MealRecord) => void;
 }) {
   const macroMax = Math.max(
@@ -3382,13 +3539,22 @@ function FoodListPanel({
                     </span>
                   </td>
                   <td>
-                    <button
-                      className="table-edit-button"
-                      type="button"
-                      onClick={() => onEdit(meal)}
-                    >
-                      수정
-                    </button>
+                    <div className="record-actions">
+                      <button
+                        className="table-edit-button"
+                        type="button"
+                        onClick={() => onEdit(meal)}
+                      >
+                        수정
+                      </button>
+                      <button
+                        className="table-delete-button"
+                        type="button"
+                        onClick={() => onDelete(meal)}
+                      >
+                        삭제
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -3444,13 +3610,22 @@ function FoodListPanel({
                     g
                   </small>
                 </div>
-                <button
-                  className="table-edit-button"
-                  type="button"
-                  onClick={() => onEdit(meal)}
-                >
-                  수정
-                </button>
+                <div className="record-actions">
+                  <button
+                    className="table-edit-button"
+                    type="button"
+                    onClick={() => onEdit(meal)}
+                  >
+                    수정
+                  </button>
+                  <button
+                    className="table-delete-button"
+                    type="button"
+                    onClick={() => onDelete(meal)}
+                  >
+                    삭제
+                  </button>
+                </div>
               </footer>
               </article>
             ))}
@@ -3622,9 +3797,30 @@ function SavedFoodPanel({
   onDelete: (food: SavedFood) => void;
   onEdit: (food: SavedFood) => void;
 }) {
+  const [sourceFilter, setSourceFilter] = useState<SourceType | "all">("all");
+  const [databaseQuery, setDatabaseQuery] = useState("");
+  const sourceCategories: Array<{
+    key: SourceType | "all";
+    label: string;
+  }> = [
+    { key: "all", label: "전체" },
+    { key: "database", label: "공식 영양 DB" },
+    { key: "label", label: "제품 표시값" },
+    { key: "ai_estimate", label: "사진 분석" },
+    { key: "manual", label: "직접 입력" },
+    { key: "reference", label: "참고 데이터" },
+  ];
+  const normalizedQuery = databaseQuery.trim().toLocaleLowerCase("ko");
+  const filteredFoods = foods.filter(
+    (food) =>
+      (sourceFilter === "all" || food.sourceType === sourceFilter) &&
+      (!normalizedQuery ||
+        food.name.toLocaleLowerCase("ko").includes(normalizedQuery) ||
+        food.sourceLabel.toLocaleLowerCase("ko").includes(normalizedQuery)),
+  );
   const macroMax = Math.max(
     10,
-    ...foods.flatMap((food) => [food.carbs, food.protein, food.fat]),
+    ...filteredFoods.flatMap((food) => [food.carbs, food.protein, food.fat]),
   );
   return (
     <section className="food-list-panel" aria-labelledby="saved-food-title">
@@ -3632,29 +3828,74 @@ function SavedFoodPanel({
         <div>
           <p className="eyebrow">나만의 영양 사전</p>
           <h2 id="saved-food-title">내 음식 DB</h2>
-          <p>자주 먹는 음식 정보를 미리 저장하고 식사 기록에 바로 추가하세요.</p>
+          <p>
+            기록에 사용한 음식은 자동으로 모이며, DB 수정값은 앞으로 추가할
+            기록에만 적용됩니다.
+          </p>
         </div>
-        <button className="primary-button" type="button" onClick={onAdd}>
-          새 음식 등록
-        </button>
+        <div className="food-db-heading-actions">
+          <label className="food-list-search">
+            <span className="sr-only">내 음식 DB 검색</span>
+            <input
+              type="search"
+              placeholder="음식 또는 출처 검색"
+              value={databaseQuery}
+              onChange={(event) => setDatabaseQuery(event.target.value)}
+            />
+          </label>
+          <button className="primary-button" type="button" onClick={onAdd}>
+            새 음식 등록
+          </button>
+        </div>
+      </div>
+      <div className="food-source-filters" aria-label="데이터 출처별 보기">
+        {sourceCategories.map((category) => {
+          const count =
+            category.key === "all"
+              ? foods.length
+              : foods.filter((food) => food.sourceType === category.key).length;
+          return (
+            <button
+              className={sourceFilter === category.key ? "active" : ""}
+              type="button"
+              key={category.key}
+              aria-pressed={sourceFilter === category.key}
+              onClick={() => setSourceFilter(category.key)}
+            >
+              {category.label}
+              <span>{count}</span>
+            </button>
+          );
+        })}
       </div>
       {loading ? (
         <div className="food-list-loading">
           <Skeleton count={4} height={150} />
         </div>
-      ) : foods.length === 0 ? (
+      ) : filteredFoods.length === 0 ? (
         <div className="empty-state insights-empty">
           <div>
-            <strong>미리 저장한 음식이 없어요.</strong>
-            자주 먹는 음식이나 레시피의 1회분 영양정보를 등록해보세요.
+            <strong>
+              {foods.length === 0
+                ? "아직 음식 DB가 비어 있어요."
+                : "선택한 출처에 해당하는 음식이 없어요."}
+            </strong>
+            {foods.length === 0
+              ? "식사를 기록하거나 자주 먹는 음식을 직접 등록해보세요."
+              : "다른 출처나 검색어를 선택해보세요."}
           </div>
         </div>
       ) : (
         <div className="saved-food-grid">
-          {foods.map((food) => (
+          {filteredFoods.map((food) => (
             <article className="saved-food-card" key={food.id}>
               <div className="saved-food-card-head">
                 <div>
+                  <span
+                    className={`source-badge ${sourceClass(food.sourceType)}`}
+                  >
+                    {food.sourceLabel || SOURCE_LABELS[food.sourceType]}
+                  </span>
                   <h3>{food.name}</h3>
                   <p>{food.servingAmount}{food.servingUnit} 기준</p>
                 </div>

@@ -2,14 +2,27 @@ import { asc } from "drizzle-orm";
 import { ensureSchema, getDb } from "../../../db";
 import { savedFoods } from "../../../db/schema";
 
+const sourceTypes = new Set([
+  "database",
+  "label",
+  "ai_estimate",
+  "manual",
+  "reference",
+]);
+
 function asNumber(value: unknown, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, parsed) : fallback;
 }
 
 function values(body: Record<string, unknown>) {
+  const requestedSourceType = String(body.sourceType ?? "manual");
   return {
     name: String(body.name ?? "").trim().slice(0, 120),
+    sourceType: sourceTypes.has(requestedSourceType)
+      ? requestedSourceType
+      : "manual",
+    sourceLabel: String(body.sourceLabel ?? "직접 등록").slice(0, 80),
     servingAmount: asNumber(body.servingAmount, 1),
     servingUnit: String(body.servingUnit ?? "인분").slice(0, 20),
     calories: asNumber(body.calories),

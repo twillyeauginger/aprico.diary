@@ -56,6 +56,8 @@ export function ensureSchema() {
         CREATE TABLE IF NOT EXISTS saved_foods (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           name TEXT NOT NULL,
+          source_type TEXT NOT NULL DEFAULT 'manual',
+          source_label TEXT NOT NULL DEFAULT '직접 등록',
           serving_amount REAL NOT NULL DEFAULT 1,
           serving_unit TEXT NOT NULL DEFAULT '인분',
           calories REAL NOT NULL DEFAULT 0,
@@ -72,6 +74,88 @@ export function ensureSchema() {
       database.prepare(`
         CREATE INDEX IF NOT EXISTS saved_foods_name_idx
         ON saved_foods (name)
+      `),
+      database.prepare(`
+        CREATE TRIGGER IF NOT EXISTS save_meal_food_to_database_insert
+        AFTER INSERT ON meal_entries
+        FOR EACH ROW
+        WHEN NOT EXISTS (
+          SELECT 1
+          FROM saved_foods
+          WHERE lower(trim(saved_foods.name)) = lower(trim(NEW.food_name))
+            AND saved_foods.source_type = NEW.source_type
+        )
+        BEGIN
+          INSERT INTO saved_foods (
+            name,
+            source_type,
+            source_label,
+            serving_amount,
+            serving_unit,
+            calories,
+            carbs,
+            protein,
+            fat,
+            sugar,
+            sodium,
+            fiber
+          )
+          VALUES (
+            NEW.food_name,
+            NEW.source_type,
+            NEW.source_label,
+            NEW.serving_amount,
+            NEW.serving_unit,
+            NEW.calories,
+            NEW.carbs,
+            NEW.protein,
+            NEW.fat,
+            NEW.sugar,
+            NEW.sodium,
+            NEW.fiber
+          );
+        END
+      `),
+      database.prepare(`
+        CREATE TRIGGER IF NOT EXISTS save_meal_food_to_database_update
+        AFTER UPDATE OF food_name, source_type ON meal_entries
+        FOR EACH ROW
+        WHEN NOT EXISTS (
+          SELECT 1
+          FROM saved_foods
+          WHERE lower(trim(saved_foods.name)) = lower(trim(NEW.food_name))
+            AND saved_foods.source_type = NEW.source_type
+        )
+        BEGIN
+          INSERT INTO saved_foods (
+            name,
+            source_type,
+            source_label,
+            serving_amount,
+            serving_unit,
+            calories,
+            carbs,
+            protein,
+            fat,
+            sugar,
+            sodium,
+            fiber
+          )
+          VALUES (
+            NEW.food_name,
+            NEW.source_type,
+            NEW.source_label,
+            NEW.serving_amount,
+            NEW.serving_unit,
+            NEW.calories,
+            NEW.carbs,
+            NEW.protein,
+            NEW.fat,
+            NEW.sugar,
+            NEW.sodium,
+            NEW.fiber
+          );
+        END
       `),
       database.prepare(`
         CREATE TABLE IF NOT EXISTS photos (

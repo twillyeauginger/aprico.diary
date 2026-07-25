@@ -32,6 +32,8 @@ export const savedFoods = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull(),
+    sourceType: text("source_type").notNull().default("manual"),
+    sourceLabel: text("source_label").notNull().default("직접 등록"),
     servingAmount: real("serving_amount").notNull().default(1),
     servingUnit: text("serving_unit").notNull().default("인분"),
     calories: real("calories").notNull().default(0),

@@ -882,6 +882,7 @@ button {
 .food-mobile-card footer {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
@@ -923,7 +924,7 @@ button {
 }
 
 .saved-food-card-head h3 {
-  margin: 0;
+  margin: 8px 0 0;
   font-size: 16px;
 }
 
@@ -966,12 +967,75 @@ button {
   color: white;
 }
 
+.food-db-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.food-source-filters {
+  display: flex;
+  gap: 7px;
+  margin: 0 0 20px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+
+.food-source-filters button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--white);
+  padding: 8px 11px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.food-source-filters button.active {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: white;
+}
+
+.food-source-filters button span {
+  min-width: 18px;
+  border-radius: 999px;
+  background: var(--paper-deep);
+  padding: 2px 5px;
+  color: var(--ink);
+  font-size: 8px;
+  text-align: center;
+}
+
+.record-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .table-edit-button {
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--white);
   padding: 7px 11px;
   color: var(--sage-dark);
+  font-size: 10px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.table-delete-button {
+  border: 1px solid #e5c5c0;
+  border-radius: 999px;
+  background: #fff8f6;
+  padding: 7px 11px;
+  color: #a33b32;
   font-size: 10px;
   font-weight: 850;
   cursor: pointer;
@@ -2375,6 +2439,13 @@ button {
   line-height: 1.55;
 }
 
+.edit-serving-helper {
+  margin: -5px 0 2px;
+  color: var(--sage-dark);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
 .upload-zone {
   position: relative;
   display: grid;
@@ -2749,6 +2820,19 @@ button {
   .food-list-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .food-db-heading-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .food-db-heading-actions .food-list-search {
+    width: 100%;
+  }
+
+  .food-db-heading-actions .primary-button {
+    width: 100%;
   }
 
   .food-list-panel {

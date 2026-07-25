@@ -48,7 +48,7 @@ export async function PUT(
         sodium: asNumber(body.sodium),
         fiber: asNumber(body.fiber),
         confidence: null,
-        photoId: null,
+        photoId: body.photoId ? String(body.photoId).slice(0, 500) : null,
       })
       .where(eq(mealEntries.id, numericId))
       .returning();
