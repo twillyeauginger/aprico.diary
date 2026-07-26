@@ -8,6 +8,121 @@ import {
 } from "./supabase";
 import "./supabase-app.css";
 
+type AuthorizationDetails = {
+  authorization_id: string;
+  redirect_uri: string;
+  client: {
+    id: string;
+    name: string;
+    uri: string;
+    logo_uri: string;
+  };
+  user: { id: string; email: string };
+  scope: string;
+};
+
+function OAuthConsent({ authorizationId }: { authorizationId: string }) {
+  const [details, setDetails] = useState<AuthorizationDetails | null>(null);
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState<"approve" | "deny" | "">("");
+
+  useEffect(() => {
+    let active = true;
+    supabase?.auth.oauth
+      .getAuthorizationDetails(authorizationId)
+      .then(({ data, error: authorizationError }) => {
+        if (!active) return;
+        if (authorizationError || !data) {
+          setError(
+            authorizationError?.message ??
+              "ChatGPT 연결 요청을 불러오지 못했습니다.",
+          );
+          return;
+        }
+        if ("redirect_url" in data) {
+          window.location.assign(data.redirect_url);
+          return;
+        }
+        setDetails(data);
+      });
+    return () => {
+      active = false;
+    };
+  }, [authorizationId]);
+
+  async function decide(action: "approve" | "deny") {
+    if (!supabase || submitting) return;
+    setSubmitting(action);
+    setError("");
+    const response =
+      action === "approve"
+        ? await supabase.auth.oauth.approveAuthorization(authorizationId, {
+            skipBrowserRedirect: true,
+          })
+        : await supabase.auth.oauth.denyAuthorization(authorizationId, {
+            skipBrowserRedirect: true,
+          });
+    if (response.error || !response.data?.redirect_url) {
+      setError(
+        response.error?.message ?? "연결 요청을 처리하지 못했습니다.",
+      );
+      setSubmitting("");
+      return;
+    }
+    window.location.assign(response.data.redirect_url);
+  }
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-card oauth-consent-card">
+        <p className="auth-kicker">Aprico Diary 연결</p>
+        <h1>ChatGPT에서 식단을 기록할까요?</h1>
+        {error ? (
+          <p className="auth-message" role="alert">
+            {error}
+          </p>
+        ) : !details ? (
+          <p>연결 요청을 확인하고 있어요.</p>
+        ) : (
+          <>
+            <p>
+              <strong>{details.client.name || "ChatGPT"}</strong>가 Aprico
+              Diary의 내 음식 DB와 식사 기록에 접근하려고 합니다.
+            </p>
+            <div className="oauth-permission-list">
+              <span>볼 수 있는 정보</span>
+              <strong>내 음식 DB 검색 · 날짜별 식사 기록 조회</strong>
+              <span>확인 후 변경할 수 있는 정보</span>
+              <strong>음식·식사 기록 추가 · 잘못된 기록 삭제</strong>
+            </div>
+            <p className="oauth-account">
+              연결 계정 <strong>{details.user.email}</strong>
+            </p>
+            <div className="oauth-consent-actions">
+              <button
+                className="oauth-deny-button"
+                type="button"
+                disabled={Boolean(submitting)}
+                onClick={() => void decide("deny")}
+              >
+                {submitting === "deny" ? "거절하는 중…" : "거절"}
+              </button>
+              <button
+                className="oauth-approve-button"
+                type="button"
+                disabled={Boolean(submitting)}
+                onClick={() => void decide("approve")}
+              >
+                {submitting === "approve" ? "연결하는 중…" : "연결 허용"}
+              </button>
+            </div>
+          </>
+        )}
+      </section>
+    </main>
+  );
+}
+
 export function SupabaseApp() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(isSupabaseConfigured);
@@ -15,6 +130,11 @@ export function SupabaseApp() {
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [googleSigningIn, setGoogleSigningIn] = useState(false);
+  const authorizationId =
+    typeof window === "undefined"
+      ? ""
+      : new URLSearchParams(window.location.search).get("authorization_id") ??
+        "";
 
   useEffect(() => {
     if (!supabase) return;
@@ -47,6 +167,9 @@ export function SupabaseApp() {
     setSending(true);
     setMessage("");
     const redirectTo = new URL(import.meta.env.BASE_URL, window.location.origin);
+    if (authorizationId) {
+      redirectTo.searchParams.set("authorization_id", authorizationId);
+    }
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
       options: { emailRedirectTo: redirectTo.toString() },
@@ -64,6 +187,9 @@ export function SupabaseApp() {
     setGoogleSigningIn(true);
     setMessage("");
     const redirectTo = new URL(import.meta.env.BASE_URL, window.location.origin);
+    if (authorizationId) {
+      redirectTo.searchParams.set("authorization_id", authorizationId);
+    }
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: redirectTo.toString() },
@@ -104,8 +230,14 @@ export function SupabaseApp() {
     return (
       <main className="auth-shell">
         <section className="auth-card">
-          <p className="auth-kicker">개인 식단 기록</p>
-          <h1>로그인하세요.</h1>
+          <p className="auth-kicker">
+            {authorizationId ? "ChatGPT 연결" : "개인 식단 기록"}
+          </p>
+          <h1>
+            {authorizationId
+              ? "연결할 Aprico Diary 계정으로 로그인하세요."
+              : "로그인하세요."}
+          </h1>
           <p>
             같은 Google 계정으로 로그인하면 아이폰, 윈도우와 맥에서 같은 기록을 볼 수
             있습니다.
@@ -162,6 +294,10 @@ export function SupabaseApp() {
         </section>
       </main>
     );
+  }
+
+  if (authorizationId) {
+    return <OAuthConsent authorizationId={authorizationId} />;
   }
 
   return (

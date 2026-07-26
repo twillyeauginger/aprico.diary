@@ -13,9 +13,11 @@
 - 음식 직접 입력 및 식품 데이터 검색
 - 음식 이름으로 식약처·USDA 공식 영양 DB 값을 불러와 수정 후 기록
 - 기록에 사용한 음식을 내 음식 DB에 자동 보관하고 출처별로 분류
-- 식사 기록의 섭취량·단위 변경 시 영양정보 자동 환산
+- 음식 DB·공식 DB 값을 불러온 뒤 기록 전 섭취량·단위 변경 시 영양정보 자동 환산
 - 음식·영양정보 사진 업로드
 - OpenAI 이미지 분석 결과 확인 후 저장
+- 캘린더와 식사 기록에서 비공개 원본 사진 다시 보기
+- 일반 ChatGPT 대화에서 OAuth로 연결한 뒤 음식·식사 기록 조회와 추가
 - 데이터 출처를 검증 DB, 제품 표시값, AI 추정값으로 구분
 - Google 로그인, 이메일 매직 링크와 기기 간 데이터 동기화
 - 홈 화면에 추가할 수 있는 PWA
@@ -124,3 +126,51 @@ supabase functions deploy chatgpt-api --no-verify-jwt
   "notes": null
 }
 ```
+
+## 일반 ChatGPT 대화 연결
+
+`chatgpt-mcp` Edge Function은 ChatGPT의 일반 대화에 연결할 수 있는 데이터 전용
+MCP 서버입니다. 읽기 도구는 바로 사용할 수 있고, 등록·삭제 도구는 실행 직전에
+사용자 확인을 받도록 설명과 안전 속성을 설정했습니다. 인증은 별도 고정 API 키가
+아니라 Aprico Diary의 Supabase 계정으로 진행됩니다.
+
+1. Supabase 대시보드의 **Authentication → URL Configuration**에서 Site
+   URL을 `https://twillyeauginger.github.io`로 지정하고, Redirect URLs에는
+   `https://twillyeauginger.github.io/aprico.diary/`를 유지합니다.
+2. **Authentication → OAuth Server**에서 OAuth 2.1 Server를 활성화하고
+   Authorization Path를 `/aprico.diary/`로 지정한 뒤 Dynamic Client
+   Registration을 활성화합니다. OAuth 동의 요청은 배포된 Aprico Diary가
+   `authorization_id`를 받아 표시합니다.
+3. 새 Edge Function을 배포합니다.
+
+```bash
+supabase functions deploy chatgpt-mcp --no-verify-jwt
+```
+
+4. ChatGPT의 **설정 → Apps → 고급 설정**에서 개발자 모드를 켠 뒤 새 앱을
+   만들고 다음 HTTPS MCP 주소를 입력합니다.
+
+`https://lexsvklkikuggtyrkzrk.supabase.co/functions/v1/chatgpt-mcp`
+
+5. 앱을 연결하면 Aprico Diary 로그인·동의 화면이 열립니다. 같은 계정으로
+   로그인하고 `연결 허용`을 누릅니다.
+6. 일반 대화에서 예를 들어 “오늘 아침 구운계란 2개 먹었어. Aprico Diary에
+   기록해줘”라고 말하면 ChatGPT가 내 음식 DB를 먼저 검색하고, 실제 저장값을
+   보여준 뒤 확인을 받아 기록합니다.
+
+OAuth 연결에는 Supabase Auth의 OAuth 2.1 Server 기능과 최신
+`@supabase/supabase-js`가 필요합니다. MCP 서버는 접근 토큰에서 사용자를
+검증하고 기존 RLS 정책으로 각 사용자의 데이터만 읽고 씁니다.
+
+## 사진 분석값과 내 음식 DB
+
+사진으로 기록할 때는 두 값을 분리합니다.
+
+- 식사 기록에는 실제 먹은 퍼센트나 g을 적용한 영양정보를 저장합니다.
+- 내 음식 DB에는 사용자가 확인한 음식 이름과 **먹기 전 사진 속 기준량의
+  영양정보**를 저장합니다.
+- 내 음식 DB 항목을 선택한 경우에는 기존 DB 값을 그대로 재사용합니다.
+
+따라서 잘못된 AI 음식 이름을 사용자가 고쳤다면 잘못된 원문이 아니라 확인한
+이름으로 저장되고, 30%만 먹었다고 입력해도 DB의 기준 영양정보가 30%로
+축소되지 않습니다.

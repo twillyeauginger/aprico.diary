@@ -52,6 +52,7 @@ type MealRow = {
   fiber: number;
   confidence: number | null;
   photo_path: string | null;
+  weight_grams: number | null;
 };
 
 type SavedFoodRow = {
@@ -61,6 +62,7 @@ type SavedFoodRow = {
   source_label: string;
   serving_amount: number;
   serving_unit: string;
+  weight_grams: number | null;
   calories: number;
   carbs: number;
   protein: number;
@@ -78,6 +80,10 @@ function rowToSavedFood(row: SavedFoodRow): SavedFood {
     sourceLabel: row.source_label ?? "직접 등록",
     servingAmount: Number(row.serving_amount),
     servingUnit: row.serving_unit,
+    weightGrams:
+      row.weight_grams === null || row.weight_grams === undefined
+        ? null
+        : Number(row.weight_grams),
     calories: Number(row.calories),
     carbs: Number(row.carbs),
     protein: Number(row.protein),
@@ -95,6 +101,7 @@ function savedFoodValues(payload: SavedFoodInput) {
     source_label: payload.sourceLabel,
     serving_amount: payload.servingAmount,
     serving_unit: payload.servingUnit,
+    weight_grams: payload.weightGrams ?? null,
     calories: payload.calories,
     carbs: payload.carbs,
     protein: payload.protein,
@@ -128,6 +135,10 @@ function rowToMeal(row: MealRow): MealRecord {
         ? null
         : Number(row.confidence),
     photoId: row.photo_path,
+    weightGrams:
+      row.weight_grams === null || row.weight_grams === undefined
+        ? null
+        : Number(row.weight_grams),
   };
 }
 
@@ -220,6 +231,7 @@ export function createSupabaseNutritionClient(
           fiber: payload.fiber,
           confidence: payload.confidence ?? null,
           photo_path: payload.photoId ?? null,
+          weight_grams: payload.weightGrams ?? null,
         })
         .select("*")
         .single();
@@ -248,6 +260,7 @@ export function createSupabaseNutritionClient(
           fiber: payload.fiber,
           confidence: null,
           photo_path: payload.photoId ?? null,
+          weight_grams: payload.weightGrams ?? null,
         })
         .eq("id", id)
         .select("*")
@@ -295,6 +308,18 @@ export function createSupabaseNutritionClient(
     async deleteSavedFood(id) {
       const { error } = await client.from("saved_foods").delete().eq("id", id);
       if (error) throw new Error(`음식을 삭제하지 못했습니다: ${error.message}`);
+    },
+
+    async getPhotoUrl(photoId) {
+      const { data, error } = await client.storage
+        .from("meal-photos")
+        .createSignedUrl(photoId, 60 * 10);
+      if (error || !data?.signedUrl) {
+        throw new Error(
+          `사진을 불러오지 못했습니다${error?.message ? `: ${error.message}` : "."}`,
+        );
+      }
+      return data.signedUrl;
     },
 
     async getNutritionGoals() {

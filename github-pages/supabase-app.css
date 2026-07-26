@@ -137,3 +137,68 @@
   background: var(--paper-deep);
   font-size: 0.86em;
 }
+
+.oauth-consent-card {
+  width: min(560px, 100%);
+}
+
+.oauth-permission-list {
+  display: grid;
+  gap: 5px;
+  margin: 24px 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--paper-deep);
+  padding: 17px;
+}
+
+.oauth-permission-list span {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.oauth-permission-list span:first-child {
+  margin-top: 0;
+}
+
+.oauth-permission-list strong {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.oauth-account {
+  font-size: 12px;
+}
+
+.oauth-consent-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.35fr;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.oauth-consent-actions button {
+  border-radius: 14px;
+  padding: 14px 18px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.oauth-consent-actions button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.oauth-deny-button {
+  border: 1px solid var(--line);
+  background: var(--white);
+  color: var(--muted);
+}
+
+.oauth-approve-button {
+  border: 0;
+  background: var(--sage-dark);
+  color: white;
+}

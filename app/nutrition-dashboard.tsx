@@ -22,6 +22,7 @@ export type MealRecord = {
   sourceLabel: string;
   servingAmount: number;
   servingUnit: string;
+  weightGrams?: number | null;
   calories: number;
   carbs: number;
   protein: number;
@@ -40,6 +41,7 @@ export type FoodResult = {
   maker?: string;
   servingAmount: number;
   servingUnit: string;
+  weightGrams?: number | null;
   calories: number;
   carbs: number;
   protein: number;
@@ -84,6 +86,12 @@ type AnalysisDraft = {
   savedFoodId?: string;
 };
 
+type PhotoViewer = {
+  photoId: string;
+  url: string;
+  meals: MealRecord[];
+};
+
 export type MealInput = Omit<MealRecord, "id" | "demo">;
 
 export type SavedFood = {
@@ -93,6 +101,7 @@ export type SavedFood = {
   sourceLabel: string;
   servingAmount: number;
   servingUnit: string;
+  weightGrams?: number | null;
   calories: number;
   carbs: number;
   protein: number;
@@ -163,6 +172,7 @@ export type NutritionClient = {
     payload: SavedFoodInput,
   ): Promise<SavedFood>;
   deleteSavedFood(id: SavedFood["id"]): Promise<void>;
+  getPhotoUrl(photoId: string): Promise<string>;
   getNutritionGoals(): Promise<NutritionGoals>;
   updateNutritionGoals(goals: NutritionGoals): Promise<NutritionGoals>;
   listCalendarSettings(month: string): Promise<CalendarSettings>;
@@ -251,6 +261,9 @@ const legacyNutritionClient: NutritionClient = {
   async deleteSavedFood(id) {
     const response = await fetch(`/api/saved-foods/${id}`, { method: "DELETE" });
     if (!response.ok) throw new Error("삭제하지 못했습니다.");
+  },
+  async getPhotoUrl(photoId) {
+    return `/api/photos/${encodeURIComponent(photoId)}`;
   },
   async getNutritionGoals() {
     const response = await fetch("/api/profile-goals");
@@ -505,7 +518,7 @@ function servingMeasure(amount: number, unit: string) {
 }
 
 function editServingMultiplier(
-  meal: Pick<MealRecord, "servingAmount" | "servingUnit">,
+  meal: Pick<MealRecord, "servingAmount" | "servingUnit" | "weightGrams">,
   nextAmountText: string,
   nextUnit: string,
 ) {
@@ -522,10 +535,30 @@ function editServingMultiplier(
 
   const original = servingMeasure(originalAmount, meal.servingUnit);
   const next = servingMeasure(nextAmount, nextUnit);
+  const normalizedNextUnit = nextUnit
+    .trim()
+    .toLocaleLowerCase()
+    .replaceAll(" ", "");
+  if (normalizedNextUnit === "%" || normalizedNextUnit === "퍼센트") {
+    return nextAmount / 100;
+  }
+  if (
+    ["인분", "회분", "배"].includes(normalizedNextUnit) &&
+    original.dimension !== `unit:${normalizedNextUnit}`
+  ) {
+    return nextAmount;
+  }
+  if (
+    next.dimension === "weight" &&
+    original.dimension !== "weight" &&
+    Number(meal.weightGrams) > 0
+  ) {
+    return next.value / Number(meal.weightGrams);
+  }
   if (original.dimension === next.dimension && original.value > 0) {
     return next.value / original.value;
   }
-  return nextAmount / originalAmount;
+  return null;
 }
 
 function formatScaledNutrition(value: number) {
@@ -538,6 +571,7 @@ function emptySavedFood() {
     name: "",
     servingAmount: "1",
     servingUnit: "인분",
+    weightGrams: "",
     calories: "",
     carbs: "",
     protein: "",
@@ -1037,6 +1071,9 @@ export function NutritionDashboard({
   >([]);
   const [analysisDrafts, setAnalysisDrafts] = useState<AnalysisDraft[]>([]);
   const [bulkPercentPrompt, setBulkPercentPrompt] = useState<string | null>(null);
+  const [servingConversionNote, setServingConversionNote] = useState("");
+  const [photoViewer, setPhotoViewer] = useState<PhotoViewer | null>(null);
+  const [photoLoadingId, setPhotoLoadingId] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<
     | { kind: "meal"; item: MealRecord }
     | { kind: "savedFood"; item: SavedFood }
@@ -1300,10 +1337,12 @@ export function NutritionDashboard({
     setQuery("");
     setFoodResults([]);
     setSavedFoodQuantity("1");
+    setServingConversionNote("");
   }
 
   function applySavedFoodQuantity(food: SavedFood, quantity: number) {
     const multiplier = Math.max(0, quantity);
+    setServingConversionNote("");
     setManual((current) => ({
       ...current,
       foodName: food.name,
@@ -1326,6 +1365,7 @@ export function NutritionDashboard({
     setManualFoodResults([]);
     setManualFoodSearchDone(false);
     setSavedFoodQuantity("1");
+    setServingConversionNote("");
     applySavedFoodQuantity(food, 1);
     setActiveTab("manual");
   }
@@ -1342,6 +1382,7 @@ export function NutritionDashboard({
     setManualFoodResults([]);
     setManualFoodSearchDone(false);
     setSavedFoodQuantity("1");
+    setServingConversionNote("");
     if (photoPreview) URL.revokeObjectURL(photoPreview);
     setPhotoPreview("");
   }
@@ -1384,6 +1425,7 @@ export function NutritionDashboard({
         sugar: Number(manual.sugar) || 0,
         sodium: Number(manual.sodium) || 0,
         fiber: Number(manual.fiber) || 0,
+        weightGrams: currentManualWeightGrams(),
       });
       closeModal();
     } catch (error) {
@@ -1443,6 +1485,18 @@ export function NutritionDashboard({
       showToast("섭취량은 0보다 큰 숫자로 입력해주세요.");
       return;
     }
+    const editedMeasure = servingMeasure(servingAmount, editForm.servingUnit);
+    const editedMultiplier = editServingMultiplier(
+      editingMeal,
+      editForm.servingAmount,
+      editForm.servingUnit,
+    );
+    const editedWeightGrams =
+      editedMeasure.dimension === "weight"
+        ? editedMeasure.value
+        : editingMeal.weightGrams && editedMultiplier !== null
+          ? editingMeal.weightGrams * editedMultiplier
+          : editingMeal.weightGrams ?? null;
     setUpdating(true);
     try {
       const updated = await client.updateMeal(editingMeal.id, {
@@ -1462,6 +1516,7 @@ export function NutritionDashboard({
         sodium: Number(editForm.sodium) || 0,
         fiber: Number(editForm.fiber) || 0,
         photoId: editingMeal.photoId,
+        weightGrams: editedWeightGrams,
       });
       setMeals((current) =>
         current.map((meal) => (meal.id === updated.id ? updated : meal)),
@@ -1489,6 +1544,7 @@ export function NutritionDashboard({
       sourceLabel: existing?.sourceLabel ?? "직접 등록",
       servingAmount: Number(savedFoodForm.servingAmount) || 1,
       servingUnit: savedFoodForm.servingUnit || "인분",
+      weightGrams: Number(savedFoodForm.weightGrams) || null,
       calories: Number(savedFoodForm.calories) || 0,
       carbs: Number(savedFoodForm.carbs) || 0,
       protein: Number(savedFoodForm.protein) || 0,
@@ -1507,6 +1563,7 @@ export function NutritionDashboard({
             name: food.name,
             servingAmount: String(food.servingAmount),
             servingUnit: food.servingUnit,
+            weightGrams: food.weightGrams ? String(food.weightGrams) : "",
             calories: String(food.calories),
             carbs: String(food.carbs),
             protein: String(food.protein),
@@ -1636,28 +1693,77 @@ export function NutritionDashboard({
     setSavedFoodQuantity("1");
     setManualFoodResults([]);
     setManualFoodSearchDone(false);
+    setServingConversionNote("");
     setActiveTab("manual");
   }
 
-  function updateManualServingAmount(value: string) {
-    if (!loadedFoodResult) {
-      setManual((current) => ({ ...current, servingAmount: value }));
+  function updateManualServing(
+    changes: Partial<Pick<typeof manual, "servingAmount" | "servingUnit">>,
+  ) {
+    const basis = loadedSavedFood ?? loadedFoodResult;
+    const servingAmount = changes.servingAmount ?? manual.servingAmount;
+    const servingUnit = changes.servingUnit ?? manual.servingUnit;
+    if (!basis) {
+      setServingConversionNote("");
+      setManual((current) => ({
+        ...current,
+        servingAmount,
+        servingUnit,
+      }));
       return;
     }
-    const ratio =
-      Math.max(0, Number(value) || 0) /
-      Math.max(loadedFoodResult.servingAmount, 1);
+
+    const ratio = editServingMultiplier(
+      {
+        servingAmount: basis.servingAmount,
+        servingUnit: basis.servingUnit,
+        weightGrams:
+          "weightGrams" in basis ? basis.weightGrams : null,
+      },
+      servingAmount,
+      servingUnit,
+    );
+    if (ratio === null) {
+      setServingConversionNote(
+        `${basis.servingAmount}${basis.servingUnit} 기준에는 ${servingUnit || "선택한 단위"} 환산 정보가 없어요. 같은 종류의 단위나 %, 인분을 사용해주세요.`,
+      );
+      setManual((current) => ({
+        ...current,
+        servingAmount,
+        servingUnit,
+      }));
+      return;
+    }
+
+    setServingConversionNote("");
     setManual((current) => ({
       ...current,
-      servingAmount: value,
-      calories: String(loadedFoodResult.calories * ratio),
-      carbs: String(loadedFoodResult.carbs * ratio),
-      protein: String(loadedFoodResult.protein * ratio),
-      fat: String(loadedFoodResult.fat * ratio),
-      sugar: String(loadedFoodResult.sugar * ratio),
-      sodium: String(loadedFoodResult.sodium * ratio),
-      fiber: String(loadedFoodResult.fiber * ratio),
+      servingAmount,
+      servingUnit,
+      calories: formatScaledNutrition(basis.calories * ratio),
+      carbs: formatScaledNutrition(basis.carbs * ratio),
+      protein: formatScaledNutrition(basis.protein * ratio),
+      fat: formatScaledNutrition(basis.fat * ratio),
+      sugar: formatScaledNutrition(basis.sugar * ratio),
+      sodium: formatScaledNutrition(basis.sodium * ratio),
+      fiber: formatScaledNutrition(basis.fiber * ratio),
     }));
+  }
+
+  function currentManualWeightGrams() {
+    const amount = Number(manual.servingAmount);
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    const currentMeasure = servingMeasure(amount, manual.servingUnit);
+    if (currentMeasure.dimension === "weight") return currentMeasure.value;
+
+    const basis = loadedSavedFood ?? loadedFoodResult;
+    if (!basis?.weightGrams) return null;
+    const ratio = editServingMultiplier(
+      basis,
+      manual.servingAmount,
+      manual.servingUnit,
+    );
+    return ratio === null ? null : basis.weightGrams * ratio;
   }
 
   async function searchManualFood() {
@@ -1805,6 +1911,7 @@ export function NutritionDashboard({
   async function confirmAnalysis() {
     if (!analysis) return;
     try {
+      const catalogFoods = [...savedFoods];
       for (const [index, item] of analysis.items.entries()) {
         const draft = analysisDrafts[index] ?? {
           name: item.name,
@@ -1818,6 +1925,36 @@ export function NutritionDashboard({
           : undefined;
         const enteredAmount = Math.max(0, Number(draft.amount) || 0);
         if (enteredAmount === 0) continue;
+        const confirmedName = draft.name.trim() || item.name;
+        if (!selectedSavedFood) {
+          const alreadySaved = catalogFoods.some(
+            (food) =>
+              food.sourceType === item.sourceType &&
+              food.name.trim().toLocaleLowerCase("ko") ===
+                confirmedName.trim().toLocaleLowerCase("ko"),
+          );
+          if (!alreadySaved) {
+            const catalogFood = await client.createSavedFood({
+              name: confirmedName,
+              sourceType: item.sourceType,
+              sourceLabel:
+                item.sourceType === "label"
+                  ? "영양정보 사진 표시값"
+                  : "GPT 사진 분석 기본값",
+              servingAmount: item.portionGrams ?? 1,
+              servingUnit: item.portionGrams ? "g" : "인분",
+              weightGrams: item.portionGrams,
+              calories: item.nutrition.calories,
+              carbs: item.nutrition.carbs,
+              protein: item.nutrition.protein,
+              fat: item.nutrition.fat,
+              sugar: item.nutrition.sugar,
+              sodium: item.nutrition.sodium,
+              fiber: item.nutrition.fiber,
+            });
+            catalogFoods.push(catalogFood);
+          }
+        }
         const ratio =
           draft.amountMode === "grams" && item.portionGrams
             ? enteredAmount / item.portionGrams
@@ -1833,7 +1970,7 @@ export function NutritionDashboard({
             mealDate: photoDate,
             mealTime: photoTime,
             mealType: mealTypeFromTime(photoTime),
-            foodName: draft.name.trim() || item.name,
+            foodName: confirmedName,
             sourceType: selectedSavedFood?.sourceType ?? item.sourceType,
             sourceLabel:
               selectedSavedFood
@@ -1852,10 +1989,15 @@ export function NutritionDashboard({
             fiber: item.nutrition.fiber * ratio,
             confidence: item.confidence,
             photoId: analysis.photoId,
+            weightGrams:
+              item.portionGrams && ratio > 0
+                ? item.portionGrams * ratio
+                : null,
           },
           "사진 분석 결과를 기록했어요.",
         );
       }
+      setSavedFoods(catalogFoods);
       closeModal();
     } catch (error) {
       showToast(error instanceof Error ? error.message : "저장하지 못했습니다.");
@@ -1885,6 +2027,29 @@ export function NutritionDashboard({
       await deleteMeal(target.item);
     } else {
       await deleteSavedFood(target.item);
+    }
+  }
+
+  async function openPhoto(photoId: string) {
+    if (!photoId || photoLoadingId) return;
+    setPhotoLoadingId(photoId);
+    try {
+      const url = await client.getPhotoUrl(photoId);
+      const candidates = [...allMeals, ...meals];
+      const seen = new Set<string>();
+      const photoMeals = candidates.filter((meal) => {
+        const key = String(meal.id);
+        if (meal.photoId !== photoId || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      setPhotoViewer({ photoId, url, meals: photoMeals });
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : "사진을 불러오지 못했습니다.",
+      );
+    } finally {
+      setPhotoLoadingId("");
     }
   }
 
@@ -2305,6 +2470,18 @@ export function NutritionDashboard({
                       >
                         {meal.sourceLabel || SOURCE_LABELS[meal.sourceType]}
                       </span>
+                      {meal.photoId && (
+                        <button
+                          className="photo-view-button"
+                          type="button"
+                          disabled={photoLoadingId === meal.photoId}
+                          onClick={() => void openPhoto(meal.photoId!)}
+                        >
+                          {photoLoadingId === meal.photoId
+                            ? "사진 불러오는 중"
+                            : "사진 보기"}
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className="meal-calories">
@@ -2370,6 +2547,8 @@ export function NutritionDashboard({
           onQueryChange={setFoodListQuery}
           onDelete={(meal) => setDeleteTarget({ kind: "meal", item: meal })}
           onEdit={openEdit}
+          onPhoto={(photoId) => void openPhoto(photoId)}
+          photoLoadingId={photoLoadingId}
         />
       ) : activeView === "foodDb" ? (
         <SavedFoodPanel
@@ -2837,7 +3016,7 @@ export function NutritionDashboard({
                         </span>
                       </div>
                       <label htmlFor="saved-food-quantity">
-                        수량
+                        1회분 배수
                         <input
                           id="saved-food-quantity"
                           inputMode="decimal"
@@ -2856,8 +3035,8 @@ export function NutritionDashboard({
                         />
                       </label>
                       <p>
-                        수량에 맞춰 섭취량과 모든 영양성분이 계산됩니다. 계산 후 아래
-                        값은 직접 수정할 수 있어요.
+                        배수 또는 아래 섭취량·단위를 바꾸면 모든 영양성분이 바로
+                        다시 계산됩니다.
                       </p>
                     </section>
                   )}
@@ -2928,7 +3107,9 @@ export function NutritionDashboard({
                         value={manual.foodName}
                         onChange={(event) => {
                           setManual({ ...manual, foodName: event.target.value });
+                          setLoadedSavedFood(null);
                           setLoadedFoodResult(null);
+                          setServingConversionNote("");
                           setManualFoodResults([]);
                           setManualFoodSearchDone(false);
                         }}
@@ -3003,7 +3184,9 @@ export function NutritionDashboard({
                         inputMode="decimal"
                         value={manual.servingAmount}
                         onChange={(event) =>
-                          updateManualServingAmount(event.target.value)
+                          updateManualServing({
+                            servingAmount: event.target.value,
+                          })
                         }
                       />
                     </div>
@@ -3011,14 +3194,31 @@ export function NutritionDashboard({
                       <label htmlFor="serving-unit">단위</label>
                       <input
                         id="serving-unit"
+                        list="serving-unit-options"
                         value={manual.servingUnit}
-                        onChange={(event) => {
-                          setManual({ ...manual, servingUnit: event.target.value });
-                          setLoadedFoodResult(null);
-                        }}
+                        onChange={(event) =>
+                          updateManualServing({
+                            servingUnit: event.target.value,
+                          })
+                        }
                       />
+                      <datalist id="serving-unit-options">
+                        {["g", "kg", "mL", "L", "%", "인분", "개", "컵"].map(
+                          (unit) => (
+                            <option key={unit} value={unit} />
+                          ),
+                        )}
+                      </datalist>
                     </div>
                   </div>
+                  {(loadedSavedFood || loadedFoodResult) && (
+                    <p
+                      className={`edit-serving-helper${servingConversionNote ? " warning" : ""}`}
+                    >
+                      {servingConversionNote ||
+                        `${loadedSavedFood?.servingAmount ?? loadedFoodResult?.servingAmount}${loadedSavedFood?.servingUnit ?? loadedFoodResult?.servingUnit} 기준으로 아래 칼로리와 영양성분을 자동 계산합니다.`}
+                    </p>
+                  )}
                   <div className="field-row">
                     <NutrientField
                       id="calories"
@@ -3278,6 +3478,24 @@ export function NutritionDashboard({
                     }
                   />
                 </div>
+                <div className="field">
+                  <label htmlFor="saved-weight-grams">기준 중량 (g, 선택)</label>
+                  <input
+                    id="saved-weight-grams"
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="any"
+                    placeholder="예: 1개 = 50g"
+                    value={savedFoodForm.weightGrams}
+                    onChange={(event) =>
+                      setSavedFoodForm({
+                        ...savedFoodForm,
+                        weightGrams: event.target.value,
+                      })
+                    }
+                  />
+                </div>
               </div>
               {savedFoodEditor !== "new" && (
                 <p className="edit-serving-helper">
@@ -3311,6 +3529,52 @@ export function NutritionDashboard({
                 {savedFoodEditor === "new" ? "내 음식 DB에 저장" : "수정 내용 저장"}
               </button>
             </form>
+          </section>
+        </div>
+      )}
+      {photoViewer && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) setPhotoViewer(null);
+          }}
+        >
+          <section
+            aria-labelledby="meal-photo-title"
+            aria-modal="true"
+            className="modal photo-viewer-modal"
+            role="dialog"
+          >
+            <div className="modal-header">
+              <div>
+                <h2 id="meal-photo-title">기록에 사용한 사진</h2>
+                <p>이 사진으로 함께 입력한 음식도 아래에서 확인할 수 있어요.</p>
+              </div>
+              <button
+                className="close-button"
+                type="button"
+                aria-label="닫기"
+                onClick={() => setPhotoViewer(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="photo-viewer-content">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={photoViewer.url} alt="식사 기록에 사용한 원본 사진" />
+              {photoViewer.meals.length > 0 && (
+                <div className="photo-viewer-meals">
+                  <strong>
+                    {photoViewer.meals[0].mealDate} ·{" "}
+                    {photoViewer.meals[0].mealTime || "시간 미입력"}
+                  </strong>
+                  <span>
+                    {photoViewer.meals.map((meal) => meal.foodName).join(" · ")}
+                  </span>
+                </div>
+              )}
+            </div>
           </section>
         </div>
       )}
@@ -3379,6 +3643,8 @@ function FoodListPanel({
   onQueryChange,
   onDelete,
   onEdit,
+  onPhoto,
+  photoLoadingId,
 }: {
   loading: boolean;
   meals: MealRecord[];
@@ -3388,6 +3654,8 @@ function FoodListPanel({
   onQueryChange: (query: string) => void;
   onDelete: (meal: MealRecord) => void;
   onEdit: (meal: MealRecord) => void;
+  onPhoto: (photoId: string) => void;
+  photoLoadingId: string;
 }) {
   const macroMax = Math.max(
     10,
@@ -3540,6 +3808,16 @@ function FoodListPanel({
                   </td>
                   <td>
                     <div className="record-actions">
+                      {meal.photoId && (
+                        <button
+                          className="table-photo-button"
+                          type="button"
+                          disabled={photoLoadingId === meal.photoId}
+                          onClick={() => onPhoto(meal.photoId!)}
+                        >
+                          {photoLoadingId === meal.photoId ? "불러오는 중" : "사진"}
+                        </button>
+                      )}
                       <button
                         className="table-edit-button"
                         type="button"
@@ -3611,6 +3889,16 @@ function FoodListPanel({
                   </small>
                 </div>
                 <div className="record-actions">
+                  {meal.photoId && (
+                    <button
+                      className="table-photo-button"
+                      type="button"
+                      disabled={photoLoadingId === meal.photoId}
+                      onClick={() => onPhoto(meal.photoId!)}
+                    >
+                      {photoLoadingId === meal.photoId ? "불러오는 중" : "사진"}
+                    </button>
+                  )}
                   <button
                     className="table-edit-button"
                     type="button"

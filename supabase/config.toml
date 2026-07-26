@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.search-foods]
 verify_jwt = false
+
+[functions.chatgpt-mcp]
+verify_jwt = false

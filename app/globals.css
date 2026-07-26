@@ -1019,7 +1019,8 @@ button {
   gap: 6px;
 }
 
-.table-edit-button {
+.table-edit-button,
+.table-photo-button {
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--white);
@@ -1028,6 +1029,10 @@ button {
   font-size: 10px;
   font-weight: 850;
   cursor: pointer;
+}
+
+.table-photo-button {
+  border-color: #b9c9bc;
 }
 
 .table-delete-button {
@@ -1947,6 +1952,23 @@ button {
   color: #696557;
 }
 
+.photo-view-button {
+  border: 1px solid #b9c9bc;
+  border-radius: 999px;
+  background: rgba(255, 253, 248, 0.88);
+  padding: 3px 8px;
+  color: var(--sage-dark);
+  font-size: 9px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.photo-view-button:disabled,
+.table-photo-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
 .meal-calories {
   text-align: right;
 }
@@ -2443,6 +2465,48 @@ button {
   margin: -5px 0 2px;
   color: var(--sage-dark);
   font-size: 10px;
+  line-height: 1.55;
+}
+
+.edit-serving-helper.warning {
+  color: #9a4d24;
+}
+
+.photo-viewer-modal {
+  width: min(760px, 100%);
+}
+
+.photo-viewer-content {
+  display: grid;
+  gap: 14px;
+  padding: 0 24px 24px;
+}
+
+.photo-viewer-content > img {
+  display: block;
+  width: 100%;
+  max-height: min(68vh, 680px);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper-deep);
+  object-fit: contain;
+}
+
+.photo-viewer-meals {
+  display: grid;
+  gap: 5px;
+  border-radius: 16px;
+  background: var(--paper-deep);
+  padding: 13px 15px;
+}
+
+.photo-viewer-meals strong {
+  font-size: 12px;
+}
+
+.photo-viewer-meals span {
+  color: var(--muted);
+  font-size: 11px;
   line-height: 1.55;
 }
 
