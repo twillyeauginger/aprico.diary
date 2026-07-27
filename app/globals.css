@@ -1129,22 +1129,48 @@ button {
 
 .trend-bars {
   display: flex;
-  height: 175px;
+  height: 196px;
   align-items: end;
-  gap: 6px;
+  gap: 8px;
   margin-top: 18px;
   overflow-x: auto;
+  padding-top: 4px;
 }
 
 .trend-day {
   display: flex;
-  min-width: 22px;
+  min-width: 38px;
   height: 100%;
   flex: 1;
   flex-direction: column;
   justify-content: end;
-  gap: 7px;
+  gap: 6px;
   text-align: center;
+}
+
+.trend-day-chart {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: end;
+  gap: 4px;
+}
+
+.trend-value {
+  color: var(--ink);
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.trend-value small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 6px;
+  font-weight: 750;
 }
 
 .trend-bar {
@@ -1155,7 +1181,7 @@ button {
   background: var(--sage);
 }
 
-.trend-day small {
+.trend-date {
   color: var(--muted);
   font-size: 9px;
 }
@@ -1226,24 +1252,16 @@ button {
   width: 9px;
   height: 9px;
   border-radius: 3px;
-  background: #2f6b46;
+  background: #a4aaa7;
   content: "";
 }
 
-.goal-heatmap-legend .calories::before {
-  background: var(--ink);
+.goal-heatmap-legend .target::before {
+  background: #466251;
 }
 
-.goal-heatmap-legend .carbs::before {
-  background: #e5484d;
-}
-
-.goal-heatmap-legend .protein::before {
-  background: #3b82f6;
-}
-
-.goal-heatmap-legend .fat::before {
-  background: #d5a600;
+.goal-heatmap-legend .over::before {
+  background: #050706;
 }
 
 .goal-heatmap-legend .recording::before {
@@ -1251,156 +1269,149 @@ button {
   background: transparent;
 }
 
-.goal-heatmap-weekdays,
-.goal-heatmap {
+.goal-metric-tables {
   display: grid;
-  width: min(100%, 460px);
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 7px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
 }
 
-.goal-heatmap-weekdays {
-  margin-bottom: 6px;
+.goal-metric-table {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 17px;
+  background: rgba(255, 253, 248, 0.72);
+  padding: 13px;
+}
+
+.goal-metric-table > header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.goal-metric-table > header > span {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 3px;
+  background: #414946;
+}
+
+.goal-metric-table.carbs > header > span {
+  background: #cf3037;
+}
+
+.goal-metric-table.protein > header > span {
+  background: #2167d7;
+}
+
+.goal-metric-table.fat > header > span {
+  background: #ffcc00;
+}
+
+.goal-metric-table > header strong {
+  font-size: 11px;
+}
+
+.goal-metric-table > header small {
+  margin-left: auto;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 8px;
+}
+
+.goal-metric-weekdays,
+.goal-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.goal-metric-weekdays {
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 8px;
   text-align: center;
 }
 
-.goal-heatmap.period-day {
-  width: min(100%, 180px);
+.goal-metric-grid.period-day {
+  width: min(100%, 150px);
   grid-template-columns: 1fr;
 }
 
-.goal-heatmap.period-day .goal-day {
-  aspect-ratio: auto;
-  min-height: 70px;
-  font-size: 16px;
-}
-
-.goal-day,
-.goal-day-placeholder {
+.goal-metric-day,
+.goal-metric-placeholder {
   aspect-ratio: 1;
   min-width: 0;
 }
 
-.goal-day {
+.goal-metric-day {
   position: relative;
-  display: grid;
-  place-items: center;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  background: #ebe9e2;
-  color: #777d78;
-  font-size: 10px;
-  font-weight: 850;
+  display: block;
+  overflow: hidden;
+  border: 1px solid #ded9ce;
+  border-radius: 8px;
+  background: #f3f0e9;
+  padding: 0;
+  color: #616964;
   cursor: pointer;
 }
 
-.goal-day.recording {
+.goal-metric-day.recording {
   border: 1px dashed var(--sage);
-  background: rgba(221, 232, 222, 0.28);
-  color: var(--sage-dark);
 }
 
-.goal-day.close.level-1 {
-  background: #dce8df;
+.goal-metric-fill {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  min-height: 2px;
+  transition:
+    height 180ms ease,
+    background 180ms ease;
 }
 
-.goal-day.close.level-2 {
-  background: #a9c4b0;
+.goal-metric-content {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  height: 100%;
+  place-content: center;
+  gap: 1px;
+  text-align: center;
 }
 
-.goal-day.close.level-3 {
-  background: #6f9d7b;
+.goal-metric-content b {
+  font-size: 9px;
+  line-height: 1;
+}
+
+.goal-metric-content small {
+  font-size: 7px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.goal-metric-day.over:not(.fat),
+.goal-metric-day.target:not(.fat) {
   color: white;
 }
 
-.goal-day.close.level-4 {
-  background: #2f6b46;
-  color: white;
+.goal-metric-day.under .goal-metric-content {
+  color: var(--ink);
+  text-shadow: 0 1px rgba(255, 255, 255, 0.82);
 }
 
-.goal-day.off.calories.level-1 {
-  background: #d7d9d8;
-}
-
-.goal-day.off.calories.level-2 {
-  background: #a4aaa7;
-}
-
-.goal-day.off.calories.level-3 {
-  background: #68716c;
-  color: white;
-}
-
-.goal-day.off.calories.level-4 {
-  background: #25302b;
-  color: white;
-}
-
-.goal-day.off.carbs.level-1 {
-  background: #fde1e2;
-}
-
-.goal-day.off.carbs.level-2 {
-  background: #f6a3a6;
-}
-
-.goal-day.off.carbs.level-3 {
-  background: #e5484d;
-  color: white;
-}
-
-.goal-day.off.carbs.level-4 {
-  background: #a9151c;
-  color: white;
-}
-
-.goal-day.off.protein.level-1 {
-  background: #dbeafe;
-}
-
-.goal-day.off.protein.level-2 {
-  background: #93c5fd;
-}
-
-.goal-day.off.protein.level-3 {
-  background: #3b82f6;
-  color: white;
-}
-
-.goal-day.off.protein.level-4 {
-  background: #1d4ed8;
-  color: white;
-}
-
-.goal-day.off.fat.level-1 {
-  background: #fff3bf;
-}
-
-.goal-day.off.fat.level-2 {
-  background: #f4d86d;
-}
-
-.goal-day.off.fat.level-3 {
-  background: #d5a600;
-}
-
-.goal-day.off.fat.level-4 {
-  background: #8a6500;
-  color: white;
-}
-
-.goal-day.selected {
+.goal-metric-day.selected {
   outline: 3px solid rgba(37, 48, 43, 0.22);
   outline-offset: 2px;
 }
 
-.goal-day > small {
-  position: absolute;
-  right: 4px;
-  bottom: 2px;
-  font-size: 8px;
+.goal-metric-grid.period-day .goal-metric-day {
+  aspect-ratio: auto;
+  min-height: 78px;
 }
 
 .goal-day-detail {
@@ -1496,7 +1507,7 @@ button {
 .time-series-bars {
   display: grid;
   min-width: 0;
-  height: 82px;
+  height: 98px;
   grid-template-columns: repeat(24, minmax(0, 1fr));
   align-items: end;
   gap: 2px;
@@ -1510,39 +1521,48 @@ button {
   );
 }
 
-.time-series-bars button {
+.time-series-bar {
+  position: relative;
   display: flex;
   min-width: 0;
   height: 100%;
   align-items: end;
-  border: 0;
-  background: transparent;
   padding: 0 1px;
-  cursor: pointer;
 }
 
-.time-series-bars button > span {
+.time-series-bar > span {
   display: block;
   width: 100%;
   border-radius: 4px 4px 1px 1px;
   background: var(--ink);
 }
 
-.time-series-row.carbs .time-series-bars button > span {
+.time-series-row.carbs .time-series-bar > span {
   background: #e5484d;
 }
 
-.time-series-row.protein .time-series-bars button > span {
+.time-series-row.protein .time-series-bar > span {
   background: #3b82f6;
 }
 
-.time-series-row.fat .time-series-bars button > span {
+.time-series-row.fat .time-series-bar > span {
   background: #d5a600;
 }
 
-.time-series-bars button:focus-visible {
-  outline: 2px solid var(--sage-dark);
-  outline-offset: 1px;
+.time-series-value {
+  position: absolute;
+  left: 50%;
+  z-index: 2;
+  color: var(--ink);
+  font-size: 6px;
+  font-weight: 900;
+  line-height: 1;
+  text-shadow:
+    0 1px 0 var(--white),
+    1px 0 0 var(--white),
+    -1px 0 0 var(--white);
+  transform: translateX(-50%);
+  white-space: nowrap;
 }
 
 .time-series-axis {
@@ -2081,29 +2101,32 @@ button {
   z-index: 100;
   display: grid;
   place-items: center;
-  overflow: auto;
+  overflow: hidden;
   padding: 24px;
   background: rgba(27, 34, 30, 0.38);
   backdrop-filter: blur(10px);
+  overscroll-behavior: contain;
 }
 
 .modal {
+  display: flex;
   width: min(660px, 100%);
   max-width: 100vw;
   max-height: min(800px, calc(100vh - 48px));
-  overflow-x: hidden;
-  overflow-y: auto;
+  max-height: min(800px, calc(100dvh - 48px));
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.58);
   border-radius: 28px;
   background: var(--paper);
   box-shadow: 0 30px 80px rgba(27, 34, 30, 0.24);
+  overscroll-behavior: contain;
 }
 
 .modal-header {
-  position: sticky;
-  top: 0;
   z-index: 3;
   display: flex;
+  flex: 0 0 auto;
   align-items: start;
   justify-content: space-between;
   gap: 20px;
@@ -2139,6 +2162,7 @@ button {
 
 .tabs {
   display: grid;
+  flex: 0 0 auto;
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
   margin: 0 24px;
@@ -2188,8 +2212,15 @@ button {
 .tab-content {
   width: 100%;
   min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
   overflow-x: hidden;
+  overflow-y: auto;
   padding: 22px 24px 26px;
+  scroll-padding-block: 16px 90px;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 .field-row {
@@ -2202,6 +2233,7 @@ button {
   display: grid;
   gap: 7px;
   margin-bottom: 14px;
+  scroll-margin-block: 16px 100px;
 }
 
 .field label {
@@ -2478,8 +2510,12 @@ button {
 
 .photo-viewer-content {
   display: grid;
+  min-height: 0;
+  overflow-y: auto;
   gap: 14px;
   padding: 0 24px 24px;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .photo-viewer-content > img {
@@ -2841,18 +2877,113 @@ button {
 
   .modal-backdrop {
     align-items: end;
-    padding: 0;
+    padding:
+      max(8px, env(safe-area-inset-top))
+      0
+      0;
   }
 
   .modal {
     width: 100%;
     max-width: 100%;
-    max-height: 92vh;
-    border-radius: 26px 26px 0 0;
+    height: calc(100vh - max(8px, env(safe-area-inset-top)));
+    height: calc(100dvh - max(8px, env(safe-area-inset-top)));
+    max-height: calc(100vh - max(8px, env(safe-area-inset-top)));
+    max-height: calc(100dvh - max(8px, env(safe-area-inset-top)));
+    border-radius: 24px 24px 0 0;
+  }
+
+  .modal-header {
+    gap: 12px;
+    padding: 16px 14px 11px;
+  }
+
+  .modal-header h2 {
+    font-size: 22px;
+  }
+
+  .modal-header p {
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .close-button {
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+  }
+
+  .tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 0 14px;
+  }
+
+  .tabs button {
+    min-height: 44px;
+    padding: 9px 7px;
+    font-size: 11px;
+  }
+
+  .tab-content {
+    padding:
+      16px
+      14px
+      calc(28px + env(safe-area-inset-bottom));
+    scroll-padding-block: 12px calc(110px + env(safe-area-inset-bottom));
   }
 
   .field-row {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .modal .field input,
+  .modal .field select,
+  .modal .search-input,
+  .modal .analysis-result-main > input,
+  .modal .analysis-db-select,
+  .modal .consumed-amount input,
+  .modal .consumed-amount select {
+    min-height: 48px;
+    font-size: 16px;
+  }
+
+  .modal .primary-button,
+  .modal .secondary-button,
+  .modal .search-button,
+  .modal .ghost-button,
+  .modal .danger-button {
+    min-height: 48px;
+  }
+
+  .modal form > .primary-button:last-child {
+    position: sticky;
+    bottom: calc(-28px - env(safe-area-inset-bottom));
+    z-index: 2;
+    margin-top: 8px;
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -10px 20px rgba(247, 244, 236, 0.92);
+  }
+
+  .confirm-modal {
+    height: auto;
+    max-height: calc(100dvh - 24px);
+    margin-bottom: max(8px, env(safe-area-inset-bottom));
+    border-radius: 24px;
+  }
+
+  .confirm-actions {
+    padding:
+      6px
+      14px
+      calc(14px + env(safe-area-inset-bottom));
+  }
+
+  .photo-viewer-content {
+    padding:
+      0
+      14px
+      calc(18px + env(safe-area-inset-bottom));
   }
 
   .manual-food-lookup {
@@ -2946,14 +3077,31 @@ button {
     justify-content: flex-start;
   }
 
-  .goal-heatmap-weekdays,
-  .goal-heatmap {
-    gap: 5px;
+  .goal-metric-tables {
+    grid-template-columns: 1fr;
+    gap: 10px;
   }
 
-  .goal-day {
+  .goal-metric-table {
+    padding: 11px;
+  }
+
+  .goal-metric-weekdays,
+  .goal-metric-grid {
+    gap: 4px;
+  }
+
+  .goal-metric-day {
+    min-height: 38px;
     border-radius: 7px;
+  }
+
+  .goal-metric-content b {
     font-size: 9px;
+  }
+
+  .goal-metric-content small {
+    font-size: 7px;
   }
 
   .goal-day-detail-values {
@@ -2972,7 +3120,7 @@ button {
   }
 
   .time-series-bars {
-    height: 66px;
+    height: 84px;
   }
 
   .time-series-axis {

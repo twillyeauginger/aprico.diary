@@ -847,6 +847,53 @@ function evaluateAdherence({
   };
 }
 
+function metricGoalProgress(
+  day: AdherenceResult,
+  metric: AdherenceMetric,
+) {
+  const target = Math.max(day.ranges[metric].target, 1);
+  const exactPercent = Math.max(0, (day.values[metric] / target) * 100);
+  const percent = Math.max(0, Math.round(exactPercent / 5) * 5);
+  const state =
+    exactPercent > 100
+      ? "over"
+      : exactPercent < 100
+        ? "under"
+        : "target";
+  const tone = Math.round(20 + Math.min(percent, 100) * 0.65);
+  const underColors: Record<AdherenceMetric, string> = {
+    calories: "#7f8783",
+    carbs: "#e5484d",
+    protein: "#3b82f6",
+    fat: "#d5a600",
+  };
+  const targetColors: Record<AdherenceMetric, string> = {
+    calories: "#414946",
+    carbs: "#cf3037",
+    protein: "#2167d7",
+    fat: "#c38d00",
+  };
+  const overColors: Record<AdherenceMetric, string> = {
+    calories: "#050706",
+    carbs: "#f0000c",
+    protein: "#004dff",
+    fat: "#ffcc00",
+  };
+
+  return {
+    exactPercent,
+    percent,
+    fillPercent: Math.min(percent, 100),
+    state,
+    color:
+      state === "over"
+        ? overColors[metric]
+        : state === "target"
+          ? targetColors[metric]
+          : `color-mix(in srgb, ${underColors[metric]} ${tone}%, white)`,
+  };
+}
+
 function dateFromKey(key: string) {
   return new Date(`${key}T12:00:00`);
 }
@@ -1080,6 +1127,27 @@ export function NutritionDashboard({
     | null
   >(null);
   const [toast, setToast] = useState("");
+  const hasOpenModal = Boolean(
+    modalOpen ||
+      editingMeal ||
+      savedFoodEditor ||
+      photoViewer ||
+      deleteTarget,
+  );
+
+  useEffect(() => {
+    if (!hasOpenModal) return;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousOverscrollBehavior =
+      document.documentElement.style.overscrollBehavior;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overscrollBehavior = "none";
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overscrollBehavior =
+        previousOverscrollBehavior;
+    };
+  }, [hasOpenModal]);
 
   useEffect(() => {
     let cancelled = false;
@@ -4234,7 +4302,6 @@ function InsightsPanel({
   const [selectedHeatmapDate, setSelectedHeatmapDate] = useState<string | null>(
     null,
   );
-  const [selectedTimeHour, setSelectedTimeHour] = useState<number | null>(null);
   const maxCalories = Math.max(
     2000,
     ...insights.dailyTotals.map((day) => day.calories),
@@ -4311,10 +4378,6 @@ function InsightsPanel({
     label: string;
     unit: string;
   }> = ADHERENCE_METRICS;
-  const selectedTimeBucket =
-    insights.nutritionTimeBuckets.find(
-      (bucket) => bucket.hour === selectedTimeHour,
-    ) ?? null;
   const hasTimedNutrition = insights.nutritionTimeBuckets.some(
     (bucket) =>
       bucket.calories > 0 ||
@@ -4408,9 +4471,9 @@ function InsightsPanel({
               <div>
                 <span className="insight-label">{periodName} 목표 리듬</span>
                 <p>
-                  기록 완료한 날은 목표에 가까울수록 진한 녹색, 벗어난 날은 가장
-                  차이가 큰 항목의 색으로 표시합니다. 운동 없는 날의 근접 범위는
-                  칼로리 ±10%, 탄단지 ±15%입니다.
+                  칼로리와 탄단지를 각각 나눠 표시합니다. 칸은 목표 달성률만큼
+                  아래에서부터 5% 단위로 차오르며, 미달은 옅게, 초과는 가장 진한
+                  색으로 가득 채웁니다.
                 </p>
               </div>
               <div className="goal-heatmap-summary">
@@ -4432,67 +4495,107 @@ function InsightsPanel({
               </div>
             </div>
             <div className="goal-heatmap-legend" aria-label="목표 리듬 범례">
-              <span className="close">목표 근접</span>
-              <span className="calories">칼로리 차이</span>
-              <span className="carbs">탄수화물 차이</span>
-              <span className="protein">단백질 차이</span>
-              <span className="fat">지방 차이</span>
+              <span className="under">미달 · 옅은 부분 채움</span>
+              <span className="target">목표 100% · 기본색</span>
+              <span className="over">초과 · 진한색으로 가득 채움</span>
               <span className="recording">기록 중</span>
             </div>
-            {period !== "day" && (
-              <div className="goal-heatmap-weekdays" aria-hidden="true">
-                {WEEKDAYS.map((weekday) => (
-                  <span key={weekday}>{weekday}</span>
-                ))}
-              </div>
-            )}
-            <div
-              className={`goal-heatmap period-${period}`}
-              aria-label="날짜별 영양 목표 달성"
-            >
-              {Array.from({ length: heatmapLeadingCells }, (_, index) => (
-                <span className="goal-day-placeholder" key={`blank-${index}`} />
-              ))}
-              {adherenceDays.map((day) => {
-                const dominantLabel = ADHERENCE_METRICS.find(
-                  (metric) => metric.key === day.dominantMetric,
-                )?.label;
-                const statusLabel =
-                  day.status === "close"
-                    ? "목표 근접"
-                    : day.status === "off"
-                      ? `${dominantLabel} ${
-                          day.direction === "over" ? "초과" : "부족"
-                        }`
-                      : day.status === "recording"
-                        ? "기록 중"
-                        : "기록 없음";
-                return (
-                  <button
-                    className={[
-                      "goal-day",
-                      day.status,
-                      day.dominantMetric ?? "",
-                      `level-${day.level}`,
-                      selectedHeatmapDate === day.date ? "selected" : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    key={day.date}
-                    type="button"
-                    title={`${day.date} · ${statusLabel}`}
-                    aria-label={`${day.date}, ${statusLabel}`}
-                    onClick={() => setSelectedHeatmapDate(day.date)}
+            <div className={`goal-metric-tables period-${period}`}>
+              {ADHERENCE_METRICS.map((metric) => (
+                <section
+                  className={`goal-metric-table ${metric.key}`}
+                  key={metric.key}
+                  aria-labelledby={`goal-metric-${metric.key}`}
+                >
+                  <header>
+                    <span aria-hidden="true" />
+                    <strong id={`goal-metric-${metric.key}`}>
+                      {metric.label}
+                    </strong>
+                    <small>{metric.unit} 기준</small>
+                  </header>
+                  {period !== "day" && (
+                    <div className="goal-metric-weekdays" aria-hidden="true">
+                      {WEEKDAYS.map((weekday) => (
+                        <span key={weekday}>{weekday}</span>
+                      ))}
+                    </div>
+                  )}
+                  <div
+                    className={`goal-metric-grid period-${period}`}
+                    role="group"
+                    aria-label={`${metric.label} 날짜별 목표 달성률`}
                   >
-                    <span>{Number(day.date.slice(-2))}</span>
-                    {day.status === "off" && (
-                      <small aria-hidden="true">
-                        {day.direction === "over" ? "↑" : "↓"}
-                      </small>
+                    {Array.from(
+                      { length: heatmapLeadingCells },
+                      (_, index) => (
+                        <span
+                          className="goal-metric-placeholder"
+                          key={`blank-${metric.key}-${index}`}
+                        />
+                      ),
                     )}
-                  </button>
-                );
-              })}
+                    {adherenceDays.map((day) => {
+                      const progress = metricGoalProgress(day, metric.key);
+                      const goalLabel = configuredGoalLabel(
+                        goals,
+                        dayTypes[day.date] ?? "default",
+                        metric.key,
+                      );
+                      const hasValue = day.status !== "empty";
+                      const statusLabel = !hasValue
+                        ? "기록 없음"
+                        : day.status === "recording"
+                          ? `기록 중, ${progress.percent}%`
+                          : progress.state === "over"
+                            ? `${progress.percent}% 초과`
+                            : progress.state === "target"
+                              ? "목표 100%"
+                              : `${progress.percent}% 미달`;
+                      const valueLabel =
+                        day.values[metric.key] < 10
+                          ? day.values[metric.key].toFixed(1)
+                          : Math.round(
+                              day.values[metric.key],
+                            ).toLocaleString();
+
+                      return (
+                        <button
+                          className={[
+                            "goal-metric-day",
+                            metric.key,
+                            hasValue ? progress.state : "empty",
+                            day.status === "recording" ? "recording" : "",
+                            selectedHeatmapDate === day.date ? "selected" : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                          key={day.date}
+                          type="button"
+                          title={`${day.date} · ${metric.label} ${valueLabel}${metric.unit} / 목표 ${goalLabel}${metric.unit} · ${statusLabel}`}
+                          aria-label={`${day.date}, ${metric.label} ${statusLabel}`}
+                          onClick={() => setSelectedHeatmapDate(day.date)}
+                        >
+                          {hasValue && (
+                            <span
+                              className="goal-metric-fill"
+                              aria-hidden="true"
+                              style={{
+                                height: `${progress.fillPercent}%`,
+                                background: progress.color,
+                              }}
+                            />
+                          )}
+                          <span className="goal-metric-content">
+                            <b>{Number(day.date.slice(-2))}</b>
+                            {hasValue && <small>{progress.percent}%</small>}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
             </div>
             {selectedAdherence && (
               <div className="goal-day-detail" aria-live="polite">
@@ -4568,14 +4671,22 @@ function InsightsPanel({
             <div className="trend-bars" aria-label="날짜별 섭취 열량">
               {insights.dailyTotals.map((day) => (
                 <div className="trend-day" key={day.date}>
-                  <span
-                    className="trend-bar"
-                    style={{
-                      height: `${Math.max(5, (day.calories / maxCalories) * 100)}%`,
-                    }}
-                    title={`${day.date}: ${Math.round(day.calories)} kcal`}
-                  />
-                  <small>{Number(day.date.slice(-2))}</small>
+                  <div className="trend-day-chart">
+                    <span className="trend-value">
+                      {Math.round(day.calories).toLocaleString()}
+                      <small>kcal</small>
+                    </span>
+                    <span
+                      className="trend-bar"
+                      style={{
+                        height: `${Math.max(5, (day.calories / maxCalories) * 100)}%`,
+                      }}
+                      title={`${day.date}: ${Math.round(day.calories)} kcal`}
+                    />
+                  </div>
+                  <small className="trend-date">
+                    {Number(day.date.slice(-2))}
+                  </small>
                 </div>
               ))}
             </div>
@@ -4631,28 +4742,39 @@ function InsightsPanel({
                     <div className="time-series-bars">
                       {insights.nutritionTimeBuckets.map((bucket) => {
                         const value = bucket[metric.key];
+                        const height =
+                          value > 0
+                            ? Math.max(6, (value / maxValue) * 82)
+                            : 0;
                         const label = `${String(bucket.hour).padStart(2, "0")}시 · ${
                           value < 10 ? value.toFixed(1) : Math.round(value)
                         }${metric.unit}`;
                         return (
-                          <button
-                            className={value > 0 ? "has-value" : ""}
+                          <div
+                            className={`time-series-bar${
+                              value > 0 ? " has-value" : ""
+                            }`}
                             key={bucket.hour}
-                            type="button"
                             title={label}
                             aria-label={label}
-                            onClick={() => setSelectedTimeHour(bucket.hour)}
+                            role="img"
                           >
+                            {value > 0 && (
+                              <small
+                                className="time-series-value"
+                                style={{ bottom: `calc(${height}% + 3px)` }}
+                              >
+                                {value < 10
+                                  ? value.toFixed(1)
+                                  : Math.round(value).toLocaleString()}
+                              </small>
+                            )}
                             <span
                               style={{
-                                height: `${
-                                  value > 0
-                                    ? Math.max(6, (value / maxValue) * 100)
-                                    : 0
-                                }%`,
+                                height: `${height}%`,
                               }}
                             />
-                          </button>
+                          </div>
                         );
                       })}
                     </div>
@@ -4673,19 +4795,6 @@ function InsightsPanel({
               <p className="time-series-empty">
                 먹은 시간을 입력하면 각 시간의 막대가 표시됩니다.
               </p>
-            )}
-            {selectedTimeBucket && (
-              <div className="time-series-detail" aria-live="polite">
-                <strong>
-                  {String(selectedTimeBucket.hour).padStart(2, "0")}시
-                </strong>
-                <span>
-                  칼로리 {Math.round(selectedTimeBucket.calories)}kcal
-                </span>
-                <span>탄수화물 {selectedTimeBucket.carbs.toFixed(1)}g</span>
-                <span>단백질 {selectedTimeBucket.protein.toFixed(1)}g</span>
-                <span>지방 {selectedTimeBucket.fat.toFixed(1)}g</span>
-              </div>
             )}
           </article>
         </div>
