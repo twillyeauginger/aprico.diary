@@ -10,6 +10,15 @@
   --sage-pale: #dde8de;
   --apricot: #e49a6c;
   --apricot-pale: #f6e1d2;
+  --calories: #25302b;
+  --calories-soft: #d7d9d8;
+  --carbs: #e5484d;
+  --carbs-soft: #fde1e2;
+  --protein: #3b82f6;
+  --protein-soft: #dbeafe;
+  --fat: #f4c430;
+  --fat-dark: #8a6500;
+  --fat-soft: #fff3bf;
   --line: #ded9ce;
   --white: #fffdf8;
   --shadow: 0 18px 50px rgba(48, 57, 51, 0.1);
@@ -242,9 +251,25 @@ button {
   box-shadow: 0 8px 32px rgba(48, 57, 51, 0.045);
 }
 
+.summary-card.calories {
+  border-top: 4px solid var(--calories);
+}
+
+.summary-card.carbs {
+  border-top: 4px solid var(--carbs);
+}
+
+.summary-card.protein {
+  border-top: 4px solid var(--protein);
+}
+
+.summary-card.fat {
+  border-top: 4px solid var(--fat);
+}
+
 .summary-card.primary {
   border-color: transparent;
-  background: var(--sage-dark);
+  background: var(--calories);
   color: white;
 }
 
@@ -303,12 +328,24 @@ button {
 .progress-fill {
   height: 100%;
   border-radius: inherit;
-  background: var(--sage);
+  background: var(--calories);
   transition: width 300ms ease;
 }
 
 .primary .progress-fill {
-  background: #c9dfcd;
+  background: white;
+}
+
+.summary-card.carbs .progress-fill {
+  background: var(--carbs);
+}
+
+.summary-card.protein .progress-fill {
+  background: var(--protein);
+}
+
+.summary-card.fat .progress-fill {
+  background: var(--fat);
 }
 
 .summary-foot {
@@ -467,6 +504,22 @@ button {
   font-weight: 750;
 }
 
+.day-goal-fields label.calories > span {
+  color: var(--calories);
+}
+
+.day-goal-fields label.carbs > span {
+  color: var(--carbs);
+}
+
+.day-goal-fields label.protein > span {
+  color: var(--protein);
+}
+
+.day-goal-fields label.fat > span {
+  color: var(--fat-dark);
+}
+
 .day-goal-fields label > div {
   display: flex;
   min-width: 0;
@@ -601,15 +654,15 @@ button {
 }
 
 .daily-goal-label.carbs {
-  color: #c62828;
+  color: var(--carbs);
 }
 
 .daily-goal-label.protein {
-  color: #2563eb;
+  color: var(--protein);
 }
 
 .daily-goal-label.fat {
-  color: #8a6500;
+  color: var(--fat-dark);
 }
 
 .daily-goal-track {
@@ -627,15 +680,15 @@ button {
 }
 
 .daily-goal-fill.carbs {
-  background: #e5484d;
+  background: var(--carbs);
 }
 
 .daily-goal-fill.protein {
-  background: #3b82f6;
+  background: var(--protein);
 }
 
 .daily-goal-fill.fat {
-  background: #f4c430;
+  background: var(--fat);
 }
 
 .daily-goal-value {
@@ -724,15 +777,15 @@ button {
 }
 
 .macro-label.carbs {
-  color: #c62828;
+  color: var(--carbs);
 }
 
 .macro-label.protein {
-  color: #2563eb;
+  color: var(--protein);
 }
 
 .macro-label.fat {
-  color: #8a6500;
+  color: var(--fat-dark);
 }
 
 .macro-track {
@@ -750,15 +803,15 @@ button {
 }
 
 .macro-carbs {
-  background: #e5484d;
+  background: var(--carbs);
 }
 
 .macro-protein {
-  background: #3b82f6;
+  background: var(--protein);
 }
 
 .macro-fat {
-  background: #f4c430;
+  background: var(--fat);
 }
 
 .macro-row strong {
@@ -856,18 +909,18 @@ button {
   display: grid;
   min-width: 0;
   gap: 4px;
-  border-top: 3px solid #e5484d;
+  border-top: 3px solid var(--carbs);
   border-radius: 10px;
   background: var(--paper);
   padding: 9px;
 }
 
 .food-mobile-nutrients > span.protein {
-  border-top-color: #3b82f6;
+  border-top-color: var(--protein);
 }
 
 .food-mobile-nutrients > span.fat {
-  border-top-color: #d5a600;
+  border-top-color: var(--fat);
 }
 
 .food-mobile-nutrients small {
@@ -935,7 +988,7 @@ button {
 }
 
 .saved-food-card-head > strong {
-  color: var(--sage-dark);
+  color: var(--calories);
   font-size: 22px;
   white-space: nowrap;
 }
@@ -1178,7 +1231,7 @@ button {
   width: 100%;
   min-height: 5px;
   border-radius: 7px 7px 3px 3px;
-  background: var(--sage);
+  background: var(--calories);
 }
 
 .trend-date {
@@ -1296,19 +1349,19 @@ button {
   height: 9px;
   flex: 0 0 auto;
   border-radius: 3px;
-  background: #414946;
+  background: var(--calories);
 }
 
 .goal-metric-table.carbs > header > span {
-  background: #cf3037;
+  background: var(--carbs);
 }
 
 .goal-metric-table.protein > header > span {
-  background: #2167d7;
+  background: var(--protein);
 }
 
 .goal-metric-table.fat > header > span {
-  background: #ffcc00;
+  background: var(--fat);
 }
 
 .goal-metric-table > header strong {
@@ -1321,18 +1374,10 @@ button {
   font-size: 8px;
 }
 
-.goal-metric-weekdays,
 .goal-metric-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 5px;
-}
-
-.goal-metric-weekdays {
-  margin-bottom: 5px;
-  color: var(--muted);
-  font-size: 8px;
-  text-align: center;
 }
 
 .goal-metric-grid.period-day {
@@ -1340,15 +1385,30 @@ button {
   grid-template-columns: 1fr;
 }
 
-.goal-metric-day,
+.goal-metric-item,
 .goal-metric-placeholder {
-  aspect-ratio: 1;
   min-width: 0;
+}
+
+.goal-metric-item {
+  display: grid;
+  gap: 4px;
+}
+
+.goal-metric-date {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 7px;
+  font-weight: 850;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .goal-metric-day {
   position: relative;
   display: block;
+  aspect-ratio: 1;
   overflow: hidden;
   border: 1px solid #ded9ce;
   border-radius: 8px;
@@ -1383,13 +1443,8 @@ button {
   text-align: center;
 }
 
-.goal-metric-content b {
-  font-size: 9px;
-  line-height: 1;
-}
-
 .goal-metric-content small {
-  font-size: 7px;
+  font-size: 8px;
   font-weight: 900;
   line-height: 1;
 }
@@ -1407,6 +1462,54 @@ button {
 .goal-metric-day.selected {
   outline: 3px solid rgba(37, 48, 43, 0.22);
   outline-offset: 2px;
+}
+
+.goal-overflow-warning {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 2;
+  display: grid;
+  width: 13px;
+  height: 13px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #991b1b;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.goal-metric-day.warning-high,
+.goal-metric-day.warning-critical {
+  border-width: 2px;
+}
+
+.goal-metric-day.warning-high::after,
+.goal-metric-day.warning-critical::after {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 5px,
+    rgba(255, 255, 255, 0.2) 5px 7px
+  );
+  content: "";
+  pointer-events: none;
+}
+
+.goal-metric-day.warning-critical {
+  border-color: #991b1b;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.42);
+}
+
+.goal-metric-day.warning-critical .goal-overflow-warning {
+  background: #991b1b;
+  color: white;
 }
 
 .goal-metric-grid.period-day .goal-metric-day {
@@ -1456,15 +1559,15 @@ button {
 }
 
 .goal-day-detail-values > span.carbs {
-  border-top-color: #e5484d;
+  border-top-color: var(--carbs);
 }
 
 .goal-day-detail-values > span.protein {
-  border-top-color: #3b82f6;
+  border-top-color: var(--protein);
 }
 
 .goal-day-detail-values > span.fat {
-  border-top-color: #d5a600;
+  border-top-color: var(--fat);
 }
 
 .goal-day-detail-values small {
@@ -1538,15 +1641,15 @@ button {
 }
 
 .time-series-row.carbs .time-series-bar > span {
-  background: #e5484d;
+  background: var(--carbs);
 }
 
 .time-series-row.protein .time-series-bar > span {
-  background: #3b82f6;
+  background: var(--protein);
 }
 
 .time-series-row.fat .time-series-bar > span {
-  background: #d5a600;
+  background: var(--fat);
 }
 
 .time-series-value {
@@ -1727,14 +1830,31 @@ button {
   box-shadow: inset 0 0 0 2px var(--sage);
 }
 
-.day-number {
-  display: grid;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  border-radius: 50%;
+.day-date-label {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  width: fit-content;
+  padding-bottom: 2px;
+  border-bottom: 2px solid transparent;
+}
+
+.day-date-label strong {
   font-size: 12px;
   font-weight: 800;
+}
+
+.day-date-label small {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.day-date-label em {
+  color: var(--calories);
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 900;
 }
 
 .day-type-badge {
@@ -1756,20 +1876,14 @@ button {
   position: absolute;
   right: 7px;
   bottom: 6px;
-  display: grid;
-  width: 17px;
-  height: 17px;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--sage-dark);
-  color: white;
-  font-size: 9px;
+  color: var(--sage-dark);
+  font-size: 12px;
   font-weight: 900;
 }
 
 .day-type-selector {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 6px;
   margin-bottom: 14px;
   border-radius: 14px;
@@ -1815,7 +1929,7 @@ button {
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid var(--sage);
-  border-radius: 50%;
+  border-radius: 7px;
   color: var(--sage-dark);
   font-weight: 900;
 }
@@ -1845,39 +1959,62 @@ button {
   color: white;
 }
 
-.day-cell.today .day-number {
-  background: var(--ink);
-  color: white;
+.day-cell.today .day-date-label {
+  border-bottom-color: var(--calories);
 }
 
 .day-kcal {
   display: block;
-  margin-top: 15px;
-  color: var(--sage-dark);
+  margin-top: 11px;
+  color: var(--calories);
   font-size: 12px;
   font-weight: 850;
 }
 
-.day-dots {
-  display: flex;
-  gap: 4px;
-  margin-top: 8px;
+.calendar-nutrition-bars {
+  display: grid;
+  gap: 3px;
+  margin-top: 6px;
 }
 
-.day-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--sage);
+.calendar-nutrition-track {
+  display: block;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--calories-soft);
 }
 
-.day-dot.label {
-  background: var(--apricot);
+.calendar-nutrition-track > span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--calories);
 }
 
-.day-dot.ai_estimate,
-.day-dot.reference {
-  background: #a29a84;
+.calendar-nutrition-track.carbs {
+  background: var(--carbs-soft);
+}
+
+.calendar-nutrition-track.carbs > span {
+  background: var(--carbs);
+}
+
+.calendar-nutrition-track.protein {
+  background: var(--protein-soft);
+}
+
+.calendar-nutrition-track.protein > span {
+  background: var(--protein);
+}
+
+.calendar-nutrition-track.fat {
+  background: var(--fat-soft);
+}
+
+.calendar-nutrition-track.fat > span {
+  background: var(--fat);
 }
 
 .day-panel {
@@ -2171,6 +2308,10 @@ button {
   background: var(--paper-deep);
 }
 
+.tabs.three-tabs {
+  grid-template-columns: repeat(3, 1fr);
+}
+
 .confirm-modal {
   max-width: 440px;
 }
@@ -2240,6 +2381,38 @@ button {
   color: var(--muted);
   font-size: 11px;
   font-weight: 800;
+}
+
+.nutrient-field.calories label {
+  color: var(--calories);
+}
+
+.nutrient-field.carbs label {
+  color: var(--carbs);
+}
+
+.nutrient-field.protein label {
+  color: var(--protein);
+}
+
+.nutrient-field.fat label {
+  color: var(--fat-dark);
+}
+
+.nutrient-field.calories input {
+  border-top: 3px solid var(--calories);
+}
+
+.nutrient-field.carbs input {
+  border-top: 3px solid var(--carbs);
+}
+
+.nutrient-field.protein input {
+  border-top: 3px solid var(--protein);
+}
+
+.nutrient-field.fat input {
+  border-top: 3px solid var(--fat);
 }
 
 .field input,
@@ -2337,7 +2510,7 @@ button {
 
 .food-result .result-kcal,
 .food-result .result-nutrition {
-  color: var(--ink);
+  color: var(--calories);
   font-size: 14px;
   font-weight: 850;
   white-space: nowrap;
@@ -2355,9 +2528,23 @@ button {
 }
 
 .food-result .result-nutrition small {
+  display: flex;
+  gap: 7px;
   color: var(--muted);
   font-size: 8px;
   font-weight: 750;
+}
+
+.food-result .result-nutrition small .carbs {
+  color: var(--carbs);
+}
+
+.food-result .result-nutrition small .protein {
+  color: var(--protein);
+}
+
+.food-result .result-nutrition small .fat {
+  color: var(--fat-dark);
 }
 
 .helper-note {
@@ -2867,8 +3054,13 @@ button {
     font-size: 9px;
   }
 
-  .day-dots {
-    margin-top: 5px;
+  .calendar-nutrition-bars {
+    gap: 2px;
+    margin-top: 4px;
+  }
+
+  .calendar-nutrition-track {
+    height: 2px;
   }
 
   .floating-add {
@@ -3086,7 +3278,6 @@ button {
     padding: 11px;
   }
 
-  .goal-metric-weekdays,
   .goal-metric-grid {
     gap: 4px;
   }
@@ -3096,8 +3287,8 @@ button {
     border-radius: 7px;
   }
 
-  .goal-metric-content b {
-    font-size: 9px;
+  .goal-metric-date {
+    font-size: 7px;
   }
 
   .goal-metric-content small {
@@ -3204,10 +3395,16 @@ button {
     min-height: 61px;
   }
 
-  .day-number {
-    width: 22px;
-    height: 22px;
+  .day-date-label strong {
     font-size: 10px;
+  }
+
+  .day-date-label small {
+    font-size: 7px;
+  }
+
+  .day-date-label em {
+    display: none;
   }
 
   .day-kcal {

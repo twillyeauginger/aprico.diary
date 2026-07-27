@@ -114,6 +114,7 @@ export type SavedFood = {
 export type SavedFoodInput = Omit<SavedFood, "id">;
 export type DayType = "default" | "exercise";
 type InsightPeriod = "day" | "week" | "month";
+type EntryModalPurpose = "meal" | "database";
 export type CalendarSettings = {
   dayTypes: Record<string, DayType>;
   completedDays: Record<string, boolean>;
@@ -652,6 +653,16 @@ function displayDate(key: string) {
   }).format(date);
 }
 
+function compactDateWithWeekday(key: string) {
+  const date = new Date(`${key}T12:00:00`);
+  return `${date.getMonth() + 1}/${date.getDate()} ${WEEKDAYS[date.getDay()]}`;
+}
+
+function dayWithWeekday(key: string) {
+  const date = new Date(`${key}T12:00:00`);
+  return `${date.getDate()} ${WEEKDAYS[date.getDay()]}`;
+}
+
 function normalizeDayType(value: unknown): DayType {
   return value === "exercise" ? "exercise" : "default";
 }
@@ -853,13 +864,19 @@ function metricGoalProgress(
 ) {
   const target = Math.max(day.ranges[metric].target, 1);
   const exactPercent = Math.max(0, (day.values[metric] / target) * 100);
-  const percent = Math.max(0, Math.round(exactPercent / 5) * 5);
   const state =
     exactPercent > 100
       ? "over"
       : exactPercent < 100
         ? "under"
         : "target";
+  const roundedPercent = Math.max(0, Math.round(exactPercent / 5) * 5);
+  const percent =
+    state === "over"
+      ? Math.max(105, roundedPercent)
+      : state === "under"
+        ? Math.min(95, roundedPercent)
+        : 100;
   const tone = Math.round(20 + Math.min(percent, 100) * 0.65);
   const underColors: Record<AdherenceMetric, string> = {
     calories: "#7f8783",
@@ -879,11 +896,22 @@ function metricGoalProgress(
     protein: "#004dff",
     fat: "#ffcc00",
   };
+  const overflowPercent = Math.max(0, percent - 100);
+  const warningLevel =
+    overflowPercent === 0
+      ? "none"
+      : overflowPercent <= 10
+        ? "mild"
+        : overflowPercent <= 25
+          ? "high"
+          : "critical";
 
   return {
     exactPercent,
     percent,
     fillPercent: Math.min(percent, 100),
+    overflowPercent,
+    warningLevel,
     state,
     color:
       state === "over"
@@ -934,11 +962,8 @@ function insightRangeLabel(period: InsightPeriod, start: Date, end: Date) {
   if (period === "month") {
     return `${start.getFullYear()}년 ${start.getMonth() + 1}월`;
   }
-  const sameMonth = start.getMonth() === end.getMonth();
-  const startLabel = `${start.getMonth() + 1}월 ${start.getDate()}일`;
-  const endLabel = sameMonth
-    ? `${end.getDate()}일`
-    : `${end.getMonth() + 1}월 ${end.getDate()}일`;
+  const startLabel = `${start.getMonth() + 1}월 ${start.getDate()}일(${WEEKDAYS[start.getDay()]})`;
+  const endLabel = `${end.getMonth() + 1}월 ${end.getDate()}일(${WEEKDAYS[end.getDay()]})`;
   return `${start.getFullYear()}년 ${startLabel}–${endLabel}`;
 }
 
@@ -1073,6 +1098,8 @@ export function NutritionDashboard({
   const [meals, setMeals] = useState<MealRecord[]>([]);
   const [isDemo, setIsDemo] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [modalPurpose, setModalPurpose] =
+    useState<EntryModalPurpose>("meal");
   const [activeTab, setActiveTab] = useState<
     "saved" | "search" | "photo" | "manual"
   >(
@@ -1095,9 +1122,7 @@ export function NutritionDashboard({
   const [savedFoods, setSavedFoods] = useState<SavedFood[]>([]);
   const [savedFoodsLoading, setSavedFoodsLoading] = useState(false);
   const [savedFoodQuery, setSavedFoodQuery] = useState("");
-  const [savedFoodEditor, setSavedFoodEditor] = useState<SavedFood | "new" | null>(
-    null,
-  );
+  const [savedFoodEditor, setSavedFoodEditor] = useState<SavedFood | null>(null);
   const [savedFoodForm, setSavedFoodForm] = useState(() =>
     emptySavedFood(),
   );
@@ -1391,11 +1416,13 @@ export function NutritionDashboard({
     setToast(message);
   }
 
-  function openAdd(
-    tab: "saved" | "search" | "photo" | "manual" = "saved",
+  function openEntryModal(
+    purpose: EntryModalPurpose,
+    tab: "saved" | "search" | "photo" | "manual",
   ) {
+    setModalPurpose(purpose);
     setActiveTab(tab);
-    setSavedFoodsLoading(true);
+    setSavedFoodsLoading(purpose === "meal");
     setModalOpen(true);
     setManual(emptyManual(selectedDate));
     setLoadedSavedFood(null);
@@ -1406,6 +1433,16 @@ export function NutritionDashboard({
     setFoodResults([]);
     setSavedFoodQuantity("1");
     setServingConversionNote("");
+  }
+
+  function openAdd(
+    tab: "saved" | "search" | "photo" | "manual" = "saved",
+  ) {
+    openEntryModal("meal", tab);
+  }
+
+  function openDatabaseFoodModal() {
+    openEntryModal("database", "search");
   }
 
   function applySavedFoodQuantity(food: SavedFood, quantity: number) {
@@ -1472,6 +1509,27 @@ export function NutritionDashboard({
     event.preventDefault();
     if (!manual.foodName.trim()) return;
     try {
+      if (modalPurpose === "database") {
+        const created = await client.createSavedFood({
+          name: manual.foodName.trim(),
+          sourceType: loadedFoodResult?.sourceType ?? "manual",
+          sourceLabel: loadedFoodResult?.sourceLabel ?? "직접 등록",
+          servingAmount: Number(manual.servingAmount) || 1,
+          servingUnit: manual.servingUnit || "인분",
+          weightGrams: currentManualWeightGrams(),
+          calories: Number(manual.calories) || 0,
+          carbs: Number(manual.carbs) || 0,
+          protein: Number(manual.protein) || 0,
+          fat: Number(manual.fat) || 0,
+          sugar: Number(manual.sugar) || 0,
+          sodium: Number(manual.sodium) || 0,
+          fiber: Number(manual.fiber) || 0,
+        });
+        setSavedFoods((current) => [created, ...current]);
+        showToast("내 음식 DB에 저장했어요.");
+        closeModal();
+        return;
+      }
       await saveMeal({
         mealDate: manual.mealDate,
         mealTime: manual.mealTime,
@@ -1604,12 +1662,10 @@ export function NutritionDashboard({
   }
 
   function savedFoodPayload(): SavedFoodInput {
-    const existing =
-      savedFoodEditor && savedFoodEditor !== "new" ? savedFoodEditor : null;
     return {
       name: savedFoodForm.name.trim(),
-      sourceType: existing?.sourceType ?? "manual",
-      sourceLabel: existing?.sourceLabel ?? "직접 등록",
+      sourceType: savedFoodEditor?.sourceType ?? "manual",
+      sourceLabel: savedFoodEditor?.sourceLabel ?? "직접 등록",
       servingAmount: Number(savedFoodForm.servingAmount) || 1,
       servingUnit: savedFoodForm.servingUnit || "인분",
       weightGrams: Number(savedFoodForm.weightGrams) || null,
@@ -1623,24 +1679,22 @@ export function NutritionDashboard({
     };
   }
 
-  function openSavedFoodEditor(food?: SavedFood) {
-    setSavedFoodEditor(food ?? "new");
+  function openSavedFoodEditor(food: SavedFood) {
+    setSavedFoodEditor(food);
     setSavedFoodForm(
-      food
-        ? {
-            name: food.name,
-            servingAmount: String(food.servingAmount),
-            servingUnit: food.servingUnit,
-            weightGrams: food.weightGrams ? String(food.weightGrams) : "",
-            calories: String(food.calories),
-            carbs: String(food.carbs),
-            protein: String(food.protein),
-            fat: String(food.fat),
-            sugar: String(food.sugar),
-            sodium: String(food.sodium),
-            fiber: String(food.fiber),
-          }
-        : emptySavedFood(),
+      {
+        name: food.name,
+        servingAmount: String(food.servingAmount),
+        servingUnit: food.servingUnit,
+        weightGrams: food.weightGrams ? String(food.weightGrams) : "",
+        calories: String(food.calories),
+        carbs: String(food.carbs),
+        protein: String(food.protein),
+        fat: String(food.fat),
+        sugar: String(food.sugar),
+        sodium: String(food.sodium),
+        fiber: String(food.fiber),
+      },
     );
   }
 
@@ -1653,7 +1707,7 @@ export function NutritionDashboard({
       const servingAmount = changes.servingAmount ?? current.servingAmount;
       const servingUnit = changes.servingUnit ?? current.servingUnit;
       const next = { ...current, servingAmount, servingUnit };
-      if (!savedFoodEditor || savedFoodEditor === "new") return next;
+      if (!savedFoodEditor) return next;
 
       const multiplier = editServingMultiplier(
         savedFoodEditor,
@@ -1675,11 +1729,7 @@ export function NutritionDashboard({
     event.preventDefault();
     if (!savedFoodForm.name.trim()) return;
     try {
-      if (savedFoodEditor === "new") {
-        const created = await client.createSavedFood(savedFoodPayload());
-        setSavedFoods((current) => [created, ...current]);
-        showToast("내 음식 DB에 저장했어요.");
-      } else if (savedFoodEditor) {
+      if (savedFoodEditor) {
         const updated = await client.updateSavedFood(
           savedFoodEditor.id,
           savedFoodPayload(),
@@ -1980,6 +2030,42 @@ export function NutritionDashboard({
     if (!analysis) return;
     try {
       const catalogFoods = [...savedFoods];
+      if (modalPurpose === "database") {
+        for (const [index, item] of analysis.items.entries()) {
+          const confirmedName =
+            analysisDrafts[index]?.name.trim() || item.name;
+          const alreadySaved = catalogFoods.some(
+            (food) =>
+              food.sourceType === item.sourceType &&
+              food.name.trim().toLocaleLowerCase("ko") ===
+                confirmedName.toLocaleLowerCase("ko"),
+          );
+          if (alreadySaved) continue;
+          const catalogFood = await client.createSavedFood({
+            name: confirmedName,
+            sourceType: item.sourceType,
+            sourceLabel:
+              item.sourceType === "label"
+                ? "영양정보 사진 표시값"
+                : "GPT 사진 분석 기본값",
+            servingAmount: item.portionGrams ?? 1,
+            servingUnit: item.portionGrams ? "g" : "인분",
+            weightGrams: item.portionGrams,
+            calories: item.nutrition.calories,
+            carbs: item.nutrition.carbs,
+            protein: item.nutrition.protein,
+            fat: item.nutrition.fat,
+            sugar: item.nutrition.sugar,
+            sodium: item.nutrition.sodium,
+            fiber: item.nutrition.fiber,
+          });
+          catalogFoods.push(catalogFood);
+        }
+        setSavedFoods(catalogFoods);
+        showToast("사진 분석 기본값을 내 음식 DB에 저장했어요.");
+        closeModal();
+        return;
+      }
       for (const [index, item] of analysis.items.entries()) {
         const draft = analysisDrafts[index] ?? {
           name: item.name,
@@ -2258,6 +2344,7 @@ export function NutritionDashboard({
         aria-label={activeView === "calendar" ? "선택한 날짜 영양 요약" : "기간 영양 요약"}
       >
         <SummaryCard
+          metric="calories"
           label={
             activeView === "calendar"
               ? "오늘의 에너지"
@@ -2279,6 +2366,7 @@ export function NutritionDashboard({
           primary
         />
         <SummaryCard
+          metric="carbs"
           label="탄수화물"
           value={Math.round(
             activeView === "calendar"
@@ -2291,6 +2379,7 @@ export function NutritionDashboard({
           )}
         />
         <SummaryCard
+          metric="protein"
           label="단백질"
           value={Math.round(
             activeView === "calendar"
@@ -2305,6 +2394,7 @@ export function NutritionDashboard({
           )}
         />
         <SummaryCard
+          metric="fat"
           label="지방"
           value={Math.round(
             activeView === "calendar"
@@ -2367,6 +2457,10 @@ export function NutritionDashboard({
               const key = dateKey(date);
               const dayMeals = dailyMap.get(key) ?? [];
               const totals = sumNutrition(dayMeals);
+              const dayGoals = goalsForDay(
+                nutritionGoals,
+                dayTypes[key] ?? "default",
+              );
               const isOutside = date.getMonth() !== viewMonth.getMonth();
               const isToday = key === dateKey(today);
               const isSelected = key === selectedDate;
@@ -2382,7 +2476,7 @@ export function NutritionDashboard({
                     .join(" ")}
                   key={key}
                   type="button"
-                  aria-label={`${key}, ${Math.round(totals.calories)}킬로칼로리`}
+                  aria-label={`${displayDate(key)}, 칼로리 ${Math.round(totals.calories)}킬로칼로리, 탄수화물 ${Math.round(totals.carbs)}그램, 단백질 ${Math.round(totals.protein)}그램, 지방 ${Math.round(totals.fat)}그램`}
                   onClick={() => {
                     setSelectedDate(key);
                     if (isOutside) {
@@ -2392,7 +2486,11 @@ export function NutritionDashboard({
                     }
                   }}
                 >
-                  <span className="day-number">{date.getDate()}</span>
+                  <span className="day-date-label">
+                    <strong>{date.getDate()}</strong>
+                    <small>{WEEKDAYS[date.getDay()]}</small>
+                    {isToday && <em>오늘</em>}
+                  </span>
                   {dayTypes[key] && dayTypes[key] !== "default" && (
                     <span className={`day-type-badge ${dayTypes[key]}`}>
                       운동
@@ -2408,13 +2506,26 @@ export function NutritionDashboard({
                       <span className="day-kcal">
                         {Math.round(totals.calories).toLocaleString()} kcal
                       </span>
-                      <span className="day-dots" aria-hidden="true">
-                        {dayMeals.slice(0, 3).map((meal) => (
-                          <span
-                            className={`day-dot ${sourceClass(meal.sourceType)}`}
-                            key={meal.id}
-                          />
-                        ))}
+                      <span className="calendar-nutrition-bars" aria-hidden="true">
+                        {([
+                          ["calories", totals.calories, dayGoals.calories],
+                          ["carbs", totals.carbs, dayGoals.carbs],
+                          ["protein", totals.protein, dayGoals.protein],
+                          ["fat", totals.fat, dayGoals.fat],
+                        ] as Array<[AdherenceMetric, number, number]>).map(
+                          ([metric, value, goal]) => (
+                            <span
+                              className={`calendar-nutrition-track ${metric}`}
+                              key={metric}
+                            >
+                              <span
+                                style={{
+                                  width: `${Math.min(100, (value / Math.max(goal, 1)) * 100)}%`,
+                                }}
+                              />
+                            </span>
+                          ),
+                        )}
                       </span>
                     </>
                   )}
@@ -2479,7 +2590,9 @@ export function NutritionDashboard({
               }
             }}
           >
-            <span aria-hidden="true">{completedDays[selectedDate] ? "✓" : "○"}</span>
+            <span aria-hidden="true">
+              {completedDays[selectedDate] ? "✓" : ""}
+            </span>
             <span>
               <strong>이날 기록 완료</strong>
               <small>완료한 날은 일·주·월 목표 달성 분석에 우선 반영됩니다.</small>
@@ -2622,7 +2735,7 @@ export function NutritionDashboard({
         <SavedFoodPanel
           foods={savedFoods}
           loading={savedFoodsLoading}
-          onAdd={() => openSavedFoodEditor()}
+          onAdd={openDatabaseFoodModal}
           onAddToMeal={addSavedFoodToMeal}
           onDelete={(food) => setDeleteTarget({ kind: "savedFood", item: food })}
           onEdit={openSavedFoodEditor}
@@ -2669,8 +2782,16 @@ export function NutritionDashboard({
           >
             <div className="modal-header">
               <div>
-                <h2 id="add-food-title">음식 기록하기</h2>
-                <p>{displayDate(selectedDate)}에 추가합니다.</p>
+                <h2 id="add-food-title">
+                  {modalPurpose === "meal"
+                    ? "음식 기록하기"
+                    : "내 음식 DB에 등록하기"}
+                </h2>
+                <p>
+                  {modalPurpose === "meal"
+                    ? `${displayDate(selectedDate)}에 추가합니다.`
+                    : "먹은 날짜와 무관한 기준 영양정보를 저장합니다."}
+                </p>
               </div>
               <button
                 className="close-button"
@@ -2681,16 +2802,22 @@ export function NutritionDashboard({
                 ×
               </button>
             </div>
-            <div className="tabs" role="tablist" aria-label="음식 입력 방법">
-              <button
-                className={activeTab === "saved" ? "active" : ""}
-                type="button"
-                role="tab"
-                aria-selected={activeTab === "saved"}
-                onClick={() => setActiveTab("saved")}
-              >
-                내 음식 DB
-              </button>
+            <div
+              className={`tabs ${modalPurpose === "database" ? "three-tabs" : ""}`}
+              role="tablist"
+              aria-label="음식 입력 방법"
+            >
+              {modalPurpose === "meal" && (
+                <button
+                  className={activeTab === "saved" ? "active" : ""}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === "saved"}
+                  onClick={() => setActiveTab("saved")}
+                >
+                  내 음식 DB
+                </button>
+              )}
               <button
                 className={activeTab === "search" ? "active" : ""}
                 type="button"
@@ -2800,7 +2927,10 @@ export function NutritionDashboard({
                   <p className="helper-note">
                     식약처 식품영양성분 DB를 우선 사용하고, 결과가 없거나 연결되지
                     않은 경우 USDA FoodData Central의 공식 분석값을 보여드립니다.
-                    결과를 선택한 뒤 섭취량과 시간을 수정할 수 있어요.
+                    결과를 선택한 뒤{" "}
+                    {modalPurpose === "meal"
+                      ? "섭취량과 시간을 수정할 수 있어요."
+                      : "DB에 저장할 기준량과 영양정보를 수정할 수 있어요."}
                   </p>
                   <div className="search-results">
                     {foodResults.map((food) => (
@@ -2821,8 +2951,9 @@ export function NutritionDashboard({
                         <span className="result-nutrition">
                           <strong>{Math.round(food.calories)} kcal</strong>
                           <small>
-                            탄 {food.carbs.toFixed(1)} · 단 {food.protein.toFixed(1)} ·
-                            지 {food.fat.toFixed(1)}g
+                            <span className="carbs">탄 {food.carbs.toFixed(1)}</span>
+                            <span className="protein">단 {food.protein.toFixed(1)}</span>
+                            <span className="fat">지 {food.fat.toFixed(1)}g</span>
                           </small>
                         </span>
                       </button>
@@ -2854,9 +2985,12 @@ export function NutritionDashboard({
                   </label>
                   <p className="helper-note">
                     사진은 비공개 저장소에 보관됩니다. 분석 결과는 바로 저장되지
-                    않으며, 확인 후 기록에 반영됩니다.
+                    않으며, 확인 후{" "}
+                    {modalPurpose === "meal"
+                      ? "기록에 반영됩니다."
+                      : "내 음식 DB에 반영됩니다."}
                   </p>
-                  {photoFile && (
+                  {photoFile && modalPurpose === "meal" && (
                     <>
                       <div className="field-row">
                         <div className="field">
@@ -2922,30 +3056,36 @@ export function NutritionDashboard({
                       <div className="notice">
                         {analysis.summary}{" "}
                         {analysis.needsUserConfirmation &&
-                          "저장하기 전에 음식과 양을 꼭 확인해주세요."}
+                          (modalPurpose === "meal"
+                            ? "저장하기 전에 음식과 양을 꼭 확인해주세요."
+                            : "저장하기 전에 음식 이름과 기준량을 꼭 확인해주세요.")}
                       </div>
                       <div className="analysis-results">
                         {analysis.items.map((item, index) => (
                           <div className="analysis-result" key={`${item.name}-${index}`}>
                             <div className="analysis-result-main">
-                              <label htmlFor={`analysis-db-${index}`}>
-                                내 음식 DB에서 바꾸기
-                              </label>
-                              <select
-                                id={`analysis-db-${index}`}
-                                className="analysis-db-select"
-                                value={analysisDrafts[index]?.savedFoodId ?? ""}
-                                onChange={(event) =>
-                                  replaceAnalysisItemFromDb(index, event.target.value)
-                                }
-                              >
-                                <option value="">사진 분석 결과 사용</option>
-                                {savedFoods.map((food) => (
-                                  <option key={food.id} value={String(food.id)}>
-                                    {food.name} · {food.servingAmount}{food.servingUnit}
-                                  </option>
-                                ))}
-                              </select>
+                              {modalPurpose === "meal" && (
+                                <>
+                                  <label htmlFor={`analysis-db-${index}`}>
+                                    내 음식 DB에서 바꾸기
+                                  </label>
+                                  <select
+                                    id={`analysis-db-${index}`}
+                                    className="analysis-db-select"
+                                    value={analysisDrafts[index]?.savedFoodId ?? ""}
+                                    onChange={(event) =>
+                                      replaceAnalysisItemFromDb(index, event.target.value)
+                                    }
+                                  >
+                                    <option value="">사진 분석 결과 사용</option>
+                                    {savedFoods.map((food) => (
+                                      <option key={food.id} value={String(food.id)}>
+                                        {food.name} · {food.servingAmount}{food.servingUnit}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </>
+                              )}
                               <label htmlFor={`analysis-name-${index}`}>음식 이름</label>
                               <input
                                 id={`analysis-name-${index}`}
@@ -2965,39 +3105,57 @@ export function NutritionDashboard({
                                 {Math.round(item.nutrition.calories)} kcal · 단백질{" "}
                                 {Math.round(item.nutrition.protein)}g
                               </p>
-                              <div className="consumed-amount">
-                                <label htmlFor={`analysis-mode-${index}`}>실제로 먹은 양</label>
-                                <select
-                                  id={`analysis-mode-${index}`}
-                                  value={analysisDrafts[index]?.amountMode ?? "percent"}
-                                  onChange={(event) =>
-                                    setAnalysisDrafts((current) =>
-                                      current.map((draft, draftIndex) =>
-                                        draftIndex === index
-                                          ? {
-                                              ...draft,
-                                              amountMode: event.target.value as "percent" | "grams",
-                                              amount:
-                                                event.target.value === "grams" && item.portionGrams
-                                                  ? String(item.portionGrams)
-                                                  : "100",
-                                            }
-                                          : draft,
-                                      ),
-                                    )
-                                  }
-                                >
-                                  <option value="percent">사진 속 양의 %</option>
-                                  {item.portionGrams && <option value="grams">그램(g)</option>}
-                                </select>
-                                <input
-                                  inputMode="decimal"
-                                  min="0"
-                                  type="number"
-                                  value={analysisDrafts[index]?.amount ?? "100"}
-                                  onFocus={(event) => event.currentTarget.select()}
-                                  onChange={(event) =>
-                                    {
+                              {modalPurpose === "meal" && (
+                                <div className="consumed-amount">
+                                  <label htmlFor={`analysis-mode-${index}`}>
+                                    실제로 먹은 양
+                                  </label>
+                                  <select
+                                    id={`analysis-mode-${index}`}
+                                    value={
+                                      analysisDrafts[index]?.amountMode ??
+                                      "percent"
+                                    }
+                                    onChange={(event) =>
+                                      setAnalysisDrafts((current) =>
+                                        current.map((draft, draftIndex) =>
+                                          draftIndex === index
+                                            ? {
+                                                ...draft,
+                                                amountMode: event.target
+                                                  .value as
+                                                  | "percent"
+                                                  | "grams",
+                                                amount:
+                                                  event.target.value ===
+                                                    "grams" &&
+                                                  item.portionGrams
+                                                    ? String(item.portionGrams)
+                                                    : "100",
+                                              }
+                                            : draft,
+                                        ),
+                                      )
+                                    }
+                                  >
+                                    <option value="percent">
+                                      사진 속 양의 %
+                                    </option>
+                                    {item.portionGrams && (
+                                      <option value="grams">그램(g)</option>
+                                    )}
+                                  </select>
+                                  <input
+                                    inputMode="decimal"
+                                    min="0"
+                                    type="number"
+                                    value={
+                                      analysisDrafts[index]?.amount ?? "100"
+                                    }
+                                    onFocus={(event) =>
+                                      event.currentTarget.select()
+                                    }
+                                    onChange={(event) => {
                                       const value = event.target.value;
                                       setAnalysisDrafts((current) =>
                                         current.map((draft, draftIndex) =>
@@ -3008,20 +3166,24 @@ export function NutritionDashboard({
                                       );
                                       if (
                                         index === 0 &&
-                                        (analysisDrafts[index]?.amountMode ?? "percent") ===
-                                          "percent" &&
+                                        (analysisDrafts[index]?.amountMode ??
+                                          "percent") === "percent" &&
                                         value !== ""
                                       ) {
                                         setBulkPercentPrompt(value);
                                       }
-                                    }
-                                  }
-                                />
-                                <span>
-                                  {analysisDrafts[index]?.amountMode === "grams" ? "g" : "%"}
-                                </span>
-                              </div>
+                                    }}
+                                  />
+                                  <span>
+                                    {analysisDrafts[index]?.amountMode ===
+                                    "grams"
+                                      ? "g"
+                                      : "%"}
+                                  </span>
+                                </div>
+                              )}
                               {index === 0 &&
+                                modalPurpose === "meal" &&
                                 bulkPercentPrompt !== null &&
                                 analysis.items.length > 1 && (
                                   <div className="bulk-apply-prompt" role="status">
@@ -3065,7 +3227,9 @@ export function NutritionDashboard({
                         type="button"
                         onClick={confirmAnalysis}
                       >
-                        확인하고 기록하기
+                        {modalPurpose === "meal"
+                          ? "확인하고 기록하기"
+                          : "분석 결과를 DB에 저장"}
                       </button>
                     </>
                   )}
@@ -3117,7 +3281,8 @@ export function NutritionDashboard({
                           {loadedFoodResult.maker || loadedFoodResult.name}의{" "}
                           {loadedFoodResult.servingAmount}
                           {loadedFoodResult.servingUnit} 기준값을 불러왔습니다.
-                          섭취량을 바꾸면 영양성분도 함께 계산됩니다.
+                          {modalPurpose === "meal" ? " 섭취량" : " 기준량"}을
+                          바꾸면 영양성분도 함께 계산됩니다.
                         </p>
                       </div>
                       <button
@@ -3128,6 +3293,7 @@ export function NutritionDashboard({
                       </button>
                     </section>
                   )}
+                  {modalPurpose === "meal" && (
                   <div className="field-row">
                     <div className="field">
                       <label htmlFor="meal-date">날짜</label>
@@ -3166,6 +3332,7 @@ export function NutritionDashboard({
                       </select>
                     </div>
                   </div>
+                  )}
                   <div className="field manual-food-name-field">
                     <label htmlFor="food-name">음식 이름</label>
                     <div className="manual-food-lookup">
@@ -3228,9 +3395,15 @@ export function NutritionDashboard({
                           <span className="result-nutrition">
                             <strong>{Math.round(food.calories)} kcal</strong>
                             <small>
-                              탄 {food.carbs.toFixed(1)} · 단{" "}
-                              {food.protein.toFixed(1)} · 지{" "}
-                              {food.fat.toFixed(1)}g
+                              <span className="carbs">
+                                탄 {food.carbs.toFixed(1)}
+                              </span>
+                              <span className="protein">
+                                단 {food.protein.toFixed(1)}
+                              </span>
+                              <span className="fat">
+                                지 {food.fat.toFixed(1)}g
+                              </span>
                             </small>
                           </span>
                         </button>
@@ -3246,7 +3419,9 @@ export function NutritionDashboard({
                   )}
                   <div className="field-row">
                     <div className="field">
-                      <label htmlFor="serving-amount">섭취량</label>
+                      <label htmlFor="serving-amount">
+                        {modalPurpose === "meal" ? "섭취량" : "기준량"}
+                      </label>
                       <input
                         id="serving-amount"
                         inputMode="decimal"
@@ -3326,7 +3501,9 @@ export function NutritionDashboard({
                     />
                   </div>
                   <button className="primary-button wide-button" type="submit">
-                    기록에 추가하기
+                    {modalPurpose === "meal"
+                      ? "기록에 추가하기"
+                      : "내 음식 DB에 저장"}
                   </button>
                 </form>
               )}
@@ -3492,7 +3669,7 @@ export function NutritionDashboard({
             <div className="modal-header">
               <div>
                 <h2 id="saved-food-editor-title">
-                  {savedFoodEditor === "new" ? "내 음식 등록" : "내 음식 수정"}
+                  내 음식 수정
                 </h2>
                 <p>먹은 날짜와 무관한 1회 섭취 기준 정보입니다.</p>
               </div>
@@ -3565,13 +3742,11 @@ export function NutritionDashboard({
                   />
                 </div>
               </div>
-              {savedFoodEditor !== "new" && (
-                <p className="edit-serving-helper">
-                  처음 저장된 {savedFoodEditor.servingAmount}
-                  {savedFoodEditor.servingUnit}을 기준으로 영양정보를 자동
-                  계산합니다. 변경값은 과거 식사 기록에 적용되지 않습니다.
-                </p>
-              )}
+              <p className="edit-serving-helper">
+                처음 저장된 {savedFoodEditor.servingAmount}
+                {savedFoodEditor.servingUnit}을 기준으로 영양정보를 자동
+                계산합니다. 변경값은 과거 식사 기록에 적용되지 않습니다.
+              </p>
               <div className="field-row">
                 {[
                   ["calories", "열량 (kcal)"],
@@ -3594,7 +3769,7 @@ export function NutritionDashboard({
                 ))}
               </div>
               <button className="primary-button wide-button" type="submit">
-                {savedFoodEditor === "new" ? "내 음식 DB에 저장" : "수정 내용 저장"}
+                수정 내용 저장
               </button>
             </form>
           </section>
@@ -3634,7 +3809,7 @@ export function NutritionDashboard({
               {photoViewer.meals.length > 0 && (
                 <div className="photo-viewer-meals">
                   <strong>
-                    {photoViewer.meals[0].mealDate} ·{" "}
+                    {displayDate(photoViewer.meals[0].mealDate)} ·{" "}
                     {photoViewer.meals[0].mealTime || "시간 미입력"}
                   </strong>
                   <span>
@@ -3770,7 +3945,7 @@ function FoodListPanel({
           <div className="daily-goal-list">
             {dailyTotals.map((day) => (
               <article className="daily-goal-card" key={day.date}>
-                <strong>{day.date}</strong>
+                <strong>{displayDate(day.date)}</strong>
                 {[
                   ["칼", day.calories, goals.calories, "kcal", "calories"],
                   ["탄", day.carbs, goals.carbs, "g", "carbs"],
@@ -3842,7 +4017,7 @@ function FoodListPanel({
             <tbody>
               {meals.map((meal) => (
                 <tr key={meal.id}>
-                  <td>{meal.mealDate}</td>
+                  <td>{compactDateWithWeekday(meal.mealDate)}</td>
                   <td>
                     <strong>{meal.foodName}</strong>
                   </td>
@@ -3918,7 +4093,8 @@ function FoodListPanel({
                   <div>
                     <h3>{meal.foodName}</h3>
                     <p>
-                      {meal.mealDate} · {meal.mealTime || "시간 미입력"} ·{" "}
+                      {compactDateWithWeekday(meal.mealDate)} ·{" "}
+                      {meal.mealTime || "시간 미입력"} ·{" "}
                       {meal.servingAmount}
                       {meal.servingUnit}
                     </p>
@@ -4073,7 +4249,20 @@ function ProfilePanel({
               </header>
               <div className="day-goal-fields">
                 {section.fields.map(([key, label, unit]) => (
-                  <label key={key}>
+                  <label
+                    className={
+                      key.toLocaleLowerCase().includes("calories")
+                        ? "calories"
+                        : key.toLocaleLowerCase().includes("carbs")
+                          ? "carbs"
+                          : key.toLocaleLowerCase().includes("protein")
+                            ? "protein"
+                            : key.toLocaleLowerCase().includes("fat")
+                              ? "fat"
+                              : ""
+                    }
+                    key={key}
+                  >
                     <span>{label}</span>
                     <div>
                       <input
@@ -4473,7 +4662,7 @@ function InsightsPanel({
                 <p>
                   칼로리와 탄단지를 각각 나눠 표시합니다. 칸은 목표 달성률만큼
                   아래에서부터 5% 단위로 차오르며, 미달은 옅게, 초과는 가장 진한
-                  색으로 가득 채웁니다.
+                  색과 경고 표시로 구분합니다.
                 </p>
               </div>
               <div className="goal-heatmap-summary">
@@ -4497,7 +4686,7 @@ function InsightsPanel({
             <div className="goal-heatmap-legend" aria-label="목표 리듬 범례">
               <span className="under">미달 · 옅은 부분 채움</span>
               <span className="target">목표 100% · 기본색</span>
-              <span className="over">초과 · 진한색으로 가득 채움</span>
+              <span className="over">초과 · 진한색 + ↑/! 경고</span>
               <span className="recording">기록 중</span>
             </div>
             <div className={`goal-metric-tables period-${period}`}>
@@ -4514,13 +4703,6 @@ function InsightsPanel({
                     </strong>
                     <small>{metric.unit} 기준</small>
                   </header>
-                  {period !== "day" && (
-                    <div className="goal-metric-weekdays" aria-hidden="true">
-                      {WEEKDAYS.map((weekday) => (
-                        <span key={weekday}>{weekday}</span>
-                      ))}
-                    </div>
-                  )}
                   <div
                     className={`goal-metric-grid period-${period}`}
                     role="group"
@@ -4548,7 +4730,7 @@ function InsightsPanel({
                         : day.status === "recording"
                           ? `기록 중, ${progress.percent}%`
                           : progress.state === "over"
-                            ? `${progress.percent}% 초과`
+                            ? `목표보다 ${progress.overflowPercent}% 초과`
                             : progress.state === "target"
                               ? "목표 100%"
                               : `${progress.percent}% 미달`;
@@ -4560,37 +4742,60 @@ function InsightsPanel({
                             ).toLocaleString();
 
                       return (
-                        <button
-                          className={[
-                            "goal-metric-day",
-                            metric.key,
-                            hasValue ? progress.state : "empty",
-                            day.status === "recording" ? "recording" : "",
-                            selectedHeatmapDate === day.date ? "selected" : "",
-                          ]
-                            .filter(Boolean)
-                            .join(" ")}
+                        <div
+                          className="goal-metric-item"
                           key={day.date}
-                          type="button"
-                          title={`${day.date} · ${metric.label} ${valueLabel}${metric.unit} / 목표 ${goalLabel}${metric.unit} · ${statusLabel}`}
-                          aria-label={`${day.date}, ${metric.label} ${statusLabel}`}
-                          onClick={() => setSelectedHeatmapDate(day.date)}
                         >
-                          {hasValue && (
-                            <span
-                              className="goal-metric-fill"
-                              aria-hidden="true"
-                              style={{
-                                height: `${progress.fillPercent}%`,
-                                background: progress.color,
-                              }}
-                            />
-                          )}
-                          <span className="goal-metric-content">
-                            <b>{Number(day.date.slice(-2))}</b>
-                            {hasValue && <small>{progress.percent}%</small>}
+                          <span className="goal-metric-date">
+                            {dayWithWeekday(day.date)}
                           </span>
-                        </button>
+                          <button
+                            className={[
+                              "goal-metric-day",
+                              metric.key,
+                              hasValue ? progress.state : "empty",
+                              day.status === "recording" ? "recording" : "",
+                              progress.warningLevel !== "none"
+                                ? `warning-${progress.warningLevel}`
+                                : "",
+                              selectedHeatmapDate === day.date ? "selected" : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                            type="button"
+                            title={`${displayDate(day.date)} · ${metric.label} ${valueLabel}${metric.unit} / 목표 ${goalLabel}${metric.unit} · ${statusLabel}`}
+                            aria-label={`${displayDate(day.date)}, ${metric.label} ${statusLabel}`}
+                            onClick={() => setSelectedHeatmapDate(day.date)}
+                          >
+                            {hasValue && (
+                              <span
+                                className="goal-metric-fill"
+                                aria-hidden="true"
+                                style={{
+                                  height: `${progress.fillPercent}%`,
+                                  background: progress.color,
+                                }}
+                              />
+                            )}
+                            {progress.state === "over" && (
+                              <span
+                                className="goal-overflow-warning"
+                                aria-hidden="true"
+                              >
+                                {progress.warningLevel === "critical" ? "!" : "↑"}
+                              </span>
+                            )}
+                            <span className="goal-metric-content">
+                              {hasValue && (
+                                <small>
+                                  {progress.state === "over"
+                                    ? `+${progress.overflowPercent}%`
+                                    : `${progress.percent}%`}
+                                </small>
+                              )}
+                            </span>
+                          </button>
+                        </div>
                       );
                     })}
                   </div>
@@ -4681,11 +4886,11 @@ function InsightsPanel({
                       style={{
                         height: `${Math.max(5, (day.calories / maxCalories) * 100)}%`,
                       }}
-                      title={`${day.date}: ${Math.round(day.calories)} kcal`}
+                      title={`${displayDate(day.date)}: ${Math.round(day.calories)} kcal`}
                     />
                   </div>
                   <small className="trend-date">
-                    {Number(day.date.slice(-2))}
+                    {dayWithWeekday(day.date)}
                   </small>
                 </div>
               ))}
@@ -4804,12 +5009,14 @@ function InsightsPanel({
 }
 
 function SummaryCard({
+  metric,
   label,
   value,
   unit,
   goal,
   primary = false,
 }: {
+  metric: AdherenceMetric;
   label: string;
   value: number;
   unit: string;
@@ -4818,7 +5025,9 @@ function SummaryCard({
 }) {
   const percent = Math.min(100, Math.round((value / goal) * 100));
   return (
-    <article className={`summary-card ${primary ? "primary" : ""}`}>
+    <article
+      className={`summary-card ${metric} ${primary ? "primary" : ""}`}
+    >
       <div className="card-label">
         <span>{label}</span>
         <span>{percent}%</span>
@@ -4846,8 +5055,18 @@ function NutrientField({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const normalizedId = id.toLocaleLowerCase();
+  const nutrientClass = normalizedId.includes("calories")
+    ? "calories"
+    : normalizedId.includes("carbs")
+      ? "carbs"
+      : normalizedId.includes("protein")
+        ? "protein"
+        : normalizedId.includes("fat")
+          ? "fat"
+          : "";
   return (
-    <div className="field">
+    <div className={`field nutrient-field ${nutrientClass}`}>
       <label htmlFor={id}>{label}</label>
       <input
         id={id}
