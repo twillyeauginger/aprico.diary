@@ -4491,10 +4491,6 @@ function InsightsPanel({
   const [selectedHeatmapDate, setSelectedHeatmapDate] = useState<string | null>(
     null,
   );
-  const maxCalories = Math.max(
-    2000,
-    ...insights.dailyTotals.map((day) => day.calories),
-  );
   const totalMeals = insights.mealTypes.reduce(
     (total, item) => total + item.count,
     0,
@@ -4861,61 +4857,6 @@ function InsightsPanel({
                 )}
               </div>
             )}
-          </article>
-          <article className="insight-card trend-card">
-            <div>
-              <span className="insight-label">
-                {period === "day" ? "이날 섭취 열량" : "일별 섭취 열량"}
-              </span>
-              <p>
-                {period === "day"
-                  ? "선택한 날짜의 총 섭취량입니다."
-                  : "막대에 날짜별 총 섭취량을 표시합니다."}
-              </p>
-            </div>
-            <div className="trend-bars" aria-label="날짜별 섭취 열량">
-              {insights.dailyTotals.map((day) => (
-                <div className="trend-day" key={day.date}>
-                  <div className="trend-day-chart">
-                    <span className="trend-value">
-                      {Math.round(day.calories).toLocaleString()}
-                      <small>kcal</small>
-                    </span>
-                    <span
-                      className="trend-bar"
-                      style={{
-                        height: `${Math.max(5, (day.calories / maxCalories) * 100)}%`,
-                      }}
-                      title={`${displayDate(day.date)}: ${Math.round(day.calories)} kcal`}
-                    />
-                  </div>
-                  <small className="trend-date">
-                    {dayWithWeekday(day.date)}
-                  </small>
-                </div>
-              ))}
-            </div>
-          </article>
-          <article className="insight-card meal-pattern-card">
-            <span className="insight-label">식사별 기록 비중</span>
-            <div className="meal-patterns">
-              {insights.mealTypes.map((item) => {
-                const percent = Math.round(
-                  (item.count / Math.max(totalMeals, 1)) * 100,
-                );
-                return (
-                  <div className="meal-pattern" key={item.type}>
-                    <div>
-                      <span>{item.type}</span>
-                      <strong>{item.count}회 · {percent}%</strong>
-                    </div>
-                    <div className="progress-track" aria-hidden="true">
-                      <div className="progress-fill" style={{ width: `${percent}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
           </article>
           <article className="insight-card meal-time-card">
             <div>
